@@ -37,3 +37,16 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+# Node / Expo
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# React Native / Expo
+.expo/
+.expo-shared/
+
+# Python
+venv/
+__pycache__/
+*.pyc
