@@ -1,17 +1,19 @@
+import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
+import { MaterialIcons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import React from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
   Dimensions,
   Image,
   ImageBackground,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from "expo-status-bar";
-import { MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 
 const screenWidth = Dimensions.get("window").width;
 const screenHeight = Dimensions.get("window").height;
@@ -23,7 +25,7 @@ export default function ProofStepsScreen() {
     <>
       <StatusBar style="light" translucent backgroundColor="transparent" />
       <ImageBackground
-        source={require("../assets/images/intermediary.png")}
+        source={Images.IntermediaryBackground}
         style={styles.backgroundImage}
         resizeMode="cover"
       >
@@ -40,7 +42,7 @@ export default function ProofStepsScreen() {
           <View style={styles.contentContainer}>
             {/* Logo */}
             <Image
-              source={require("../assets/images/elife-trans.png")}
+              source={Images.ElifeLogoTransparent}
               style={styles.logo}
               resizeMode="contain"
             />
@@ -78,7 +80,7 @@ export default function ProofStepsScreen() {
             <TouchableOpacity
               style={styles.proceedBtn}
               activeOpacity={0.8}
-              onPress={() => router.push("/step1-upload-id")}
+              onPress={() => router.push(Routes.Step1UploadID)}
             >
               <Text style={styles.proceedText}>I'm Ready to Begin</Text>
             </TouchableOpacity>

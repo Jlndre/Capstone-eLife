@@ -1,14 +1,15 @@
-import React, { useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  Animated,
-  TouchableOpacity,
-} from "react-native";
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React, { useEffect, useRef } from "react";
+import {
+  Animated,
+  Dimensions,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 const { width, height } = Dimensions.get("window");
 
@@ -57,7 +58,7 @@ const UploadErrorScreen = () => {
 
       <TouchableOpacity
         style={styles.tryAgainButton}
-        onPress={() => router.replace("/step1-upload-id")}
+        onPress={() => router.replace(Routes.Step1UploadID)}
       >
         <Text style={styles.tryAgainText}>Please Try Again</Text>
       </TouchableOpacity>

@@ -1,6 +1,6 @@
-import { useRouter } from "expo-router";
-
+import { Images } from "@/assets/images";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -164,7 +164,7 @@ const LoginScreen: React.FC = () => {
             ]}
           >
             <ImageBackground
-              source={require("./../assets/images/login-header.jpg")}
+              source={Images.LoginHeader}
               style={styles.image}
               resizeMode="cover"
             >

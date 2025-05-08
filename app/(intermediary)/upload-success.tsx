@@ -1,15 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  Animated,
-  Easing,
-  TouchableOpacity,
-} from "react-native";
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 const { width, height } = Dimensions.get("window");
 
@@ -56,7 +57,7 @@ const UploadSuccessScreen = () => {
       {showButton && (
         <TouchableOpacity
           style={styles.nextButton}
-          onPress={() => router.push("/step2-verification")}
+          onPress={() => router.replace(Routes.Step2Verification)}
         >
           <Text style={styles.nextButtonText}>Next</Text>
         </TouchableOpacity>

@@ -1,14 +1,15 @@
-import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React from "react";
+import {
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // Example mock data for the past 2 years
 const mockCertificates = [
@@ -30,7 +31,7 @@ export default function PensionHistory() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.replace("/(tabs)")}
+          onPress={() => router.replace(Routes.Home)}
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={26} color="#2C3E50" />

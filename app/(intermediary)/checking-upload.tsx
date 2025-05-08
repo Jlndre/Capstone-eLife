@@ -1,12 +1,14 @@
+import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  Animated,
   Dimensions,
   ImageBackground,
-  Animated,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 const { width, height } = Dimensions.get("window");
@@ -46,9 +48,9 @@ const ApprovalPendingScreen = () => {
       const uploadSuccess = Math.random() < 0.85; // 85% success rate for realism
 
       if (uploadSuccess) {
-        router.replace("/upload-success");
+        router.replace(Routes.UploadSuccess);
       } else {
-        router.replace("/upload-error");
+        router.replace(Routes.UploadError);
       }
     }, 3500); // Adjust timing as needed
 
@@ -57,7 +59,7 @@ const ApprovalPendingScreen = () => {
 
   return (
     <ImageBackground
-      source={require("../assets/images/intermediary.png")}
+      source={Images.IntermediaryBackground}
       style={styles.container}
       resizeMode="cover"
     >

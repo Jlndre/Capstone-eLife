@@ -1,7 +1,9 @@
-import React, { useEffect } from "react";
-import { StyleSheet, ImageBackground } from "react-native";
-import { useRouter, useNavigation } from "expo-router";
+import { Animations } from "@/assets/animations";
+import { Images } from "@/assets/images";
+import { useNavigation, useRouter } from "expo-router";
 import LottieView from "lottie-react-native";
+import React, { useEffect } from "react";
+import { ImageBackground, StyleSheet } from "react-native";
 
 export default function LoadingScreen() {
   const router = useRouter();
@@ -19,12 +21,12 @@ export default function LoadingScreen() {
 
   return (
     <ImageBackground
-      source={require("../assets/images/loading-background.png")}
+      source={Images.LoadingBackground}
       style={styles.background}
       resizeMode="cover"
     >
       <LottieView
-        source={require("../assets/animations/elifelogo.json")}
+        source={Animations.ElifeLogo}
         autoPlay
         loop
         style={styles.lottie}

@@ -1,22 +1,24 @@
-import React, { useState, useRef, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ActivityIndicator,
-  Modal,
-} from "react-native";
-import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
+import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
+import { FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 type UserProfile = {
   name: string;
@@ -40,9 +42,7 @@ export default function ProfileScreen() {
     dateOfBirth: "15/04/1958",
     bankAccount: "XXXX-XXXX-XXXX-5678",
     emergencyContact: "Sarah Brown (+44 7123 456790)",
-    profileImageUrl: Image.resolveAssetSource(
-      require("../assets/images/profilepic.png")
-    ).uri,
+    profileImageUrl: Image.resolveAssetSource(Images.ProfilePicAlt).uri,
   });
 
   const [isEditing, setIsEditing] = useState(false);
@@ -210,7 +210,7 @@ export default function ProfileScreen() {
           <View style={styles.header}>
             <Text style={styles.headerTitle}>My Profile</Text>
             <TouchableOpacity
-              onPress={() => router.replace("/(tabs)")}
+              onPress={() => router.replace(Routes.Home)}
               style={styles.closeButton}
             >
               <Ionicons name="close" size={28} color="#1F245E" />

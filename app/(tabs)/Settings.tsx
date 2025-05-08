@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  Switch,
-  Platform,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from "expo-status-bar";
+import { Routes } from "@/constants/routes";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useRouter } from "expo-router";
-import { Linking } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useState } from "react";
+
+import {
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface SettingsItemProps {
   icon: string;
@@ -92,7 +93,7 @@ export default function SettingsScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => router.replace("/(tabs)")}
+            onPress={() => router.replace(Routes.Home)}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={28} color="#2C3E50" />

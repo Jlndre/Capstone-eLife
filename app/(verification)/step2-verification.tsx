@@ -1,16 +1,18 @@
+import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
+import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
   Dimensions,
-  TouchableOpacity,
   Image,
   SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
 import Svg, { Path } from "react-native-svg";
-import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
 
@@ -35,7 +37,7 @@ const Step2VerificationScreen = () => {
       </View>
 
       <Image
-        source={require("../assets/images/verification-graphic.png")}
+        source={Images.VerificationGraphic}
         style={styles.illustration}
         resizeMode="contain"
       />
@@ -80,7 +82,7 @@ const Step2VerificationScreen = () => {
 
         <TouchableOpacity
           style={styles.verificationButton}
-          onPress={() => router.push("/facial-record")}
+          onPress={() => router.push(Routes.FacialRecord)}
         >
           <FontAwesome5
             name="user-shield"

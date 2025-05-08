@@ -1,22 +1,23 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  Dimensions,
-  ImageBackground,
-  Pressable,
-  ScrollView,
-  Modal,
-  Alert,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from "expo-status-bar";
-import { MaterialIcons, Ionicons, AntDesign } from "@expo/vector-icons";
+import { Images } from "@/assets/images";
+import { AntDesign, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import React, { useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  Image,
+  ImageBackground,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import SideMenuDrawer from "../../components/SideMenu";
 
 const screenWidth = Dimensions.get("window").width;
@@ -63,7 +64,7 @@ export default function DashboardScreen() {
     <>
       <StatusBar style="light" translucent backgroundColor="transparent" />
       <ImageBackground
-        source={require("../../assets/images/Dashboard.png")}
+        source={Images.DashboardBackground}
         style={styles.backgroundImage}
         resizeMode="cover"
       >
@@ -73,10 +74,7 @@ export default function DashboardScreen() {
             <Pressable onPress={() => setDrawerVisible(true)}>
               <Text style={styles.hamburger}>☰</Text>
             </Pressable>
-            <Image
-              source={require("../../assets/images/profilepic.png")}
-              style={styles.profilePic}
-            />
+            <Image source={Images.ProfilePicAlt} style={styles.profilePic} />
           </View>
 
           {/* Header Text */}

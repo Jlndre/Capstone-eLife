@@ -1,19 +1,20 @@
+import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Camera } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
+  Dimensions,
   Image,
   SafeAreaView,
-  Dimensions,
-  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
 import Svg, { Path } from "react-native-svg";
-import * as ImagePicker from "expo-image-picker";
-import { Camera } from "expo-camera";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
 
@@ -92,7 +93,7 @@ const UploadPhotoIDScreen = () => {
       </View>
 
       <Image
-        source={require("../assets/images/id-graphic.png")}
+        source={Images.IdGraphic}
         style={styles.idImage}
         resizeMode="contain"
       />
@@ -138,7 +139,7 @@ const UploadPhotoIDScreen = () => {
 
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => router.push("/StartProcess")}
+        onPress={() => router.push(Routes.StartProcess)}
       >
         <Text style={styles.backButtonText}>Go back</Text>
       </TouchableOpacity>
@@ -146,7 +147,7 @@ const UploadPhotoIDScreen = () => {
       {file && (
         <TouchableOpacity
           style={styles.nextButton}
-          onPress={() => router.push("/checking-upload")}
+          onPress={() => router.push(Routes.CheckingUpload)}
         >
           <Text style={styles.nextButtonText}>Next</Text>
         </TouchableOpacity>
