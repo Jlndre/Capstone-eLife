@@ -1,7 +1,10 @@
 import { Images } from "@/assets/images";
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useState } from "react";
+
 import {
   ActivityIndicator,
   Alert,
@@ -114,22 +117,37 @@ const LoginScreen: React.FC = () => {
     if (!validateForm()) return;
 
     setIsLoading(true);
+
     try {
-      const response = await fetch("http://192.168.100.245:5001/api/login", {
+      const response = await fetch("http://10.22.17.226:5001/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          pensioner_number: credentials.userId,
+          pensioner_number: credentials.userId.replace(/-/g, ""), // Cleaned format
           password: credentials.password,
         }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      console.log("RAW RESPONSE:", text); // Debug HTML vs JSON
 
-      if (data.success) {
-        router.replace("/Dashboard");
-      } else {
-        Alert.alert("Login failed", data.message);
+      try {
+        const data = JSON.parse(text); // Safely parse
+
+        if (data.token) {
+          await SecureStore.setItemAsync("jwt", data.token);
+          router.replace(Routes.Home);
+        } else {
+          Alert.alert("Login failed", data.message || "Unknown error occurred");
+        }
+      } catch (jsonError) {
+        console.error("JSON parse failed:", jsonError);
+        Alert.alert(
+          "Error",
+          "Unexpected server response. Please check the backend logs."
+        );
       }
     } catch (error) {
       console.error("Login error:", error);

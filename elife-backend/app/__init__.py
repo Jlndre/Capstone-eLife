@@ -15,7 +15,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    CORS(app)  
+    CORS(app)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -24,11 +24,8 @@ def create_app():
 
     login_manager.login_view = 'auth.login'
 
+    # Register blueprints
     from app.views import auth
     app.register_blueprint(auth)
-
-    from app.api_routes import api
-    app.register_blueprint(api)
-    csrf.exempt(api)  
 
     return app

@@ -1,10 +1,11 @@
-import { Images } from "@/assets/images";
+import { Images, ProfileInitials } from "@/assets/images";
 import { Routes } from "@/constants/routes";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -26,17 +27,42 @@ import SideMenuDrawer from "../../components/SideMenu";
 
 const screenWidth = Dimensions.get("window").width;
 
+type ProfileData = {
+  firstname: string;
+  lastname: string;
+};
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const [isDrawerVisible, setDrawerVisible] = useState(false);
   const [isCurrentQuarterCompleted, setIsCurrentQuarterCompleted] =
-    useState(false); // 🆕 simulate state from dashboard
+    useState(false);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const token = await SecureStore.getItemAsync("jwt");
+        const res = await fetch("http://10.22.17.226:5001/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setProfile({
+          firstname: data.details.firstname,
+          lastname: data.details.lastname,
+        });
+      } catch (err) {
+        console.error("Failed to load profile", err);
+      }
+    };
+    fetchProfile();
+  }, []);
 
   const handleProofOfLifePress = () => {
     if (!isCurrentQuarterCompleted) {
-      router.push("/StartProcess");
+      router.push(Routes.StartProcess);
     } else {
       Alert.alert(
         "No Verification Needed",
@@ -59,12 +85,25 @@ export default function HomeScreen() {
             <Pressable onPress={() => setDrawerVisible(true)}>
               <Text style={styles.hamburger}>☰</Text>
             </Pressable>
-            <Image source={Images.ProfilePicAlt} style={styles.profilePic} />
+            <Image
+              source={
+                profile
+                  ? ProfileInitials[
+                      profile.firstname.charAt(0).toUpperCase()
+                    ] ?? Images.ProfilePicAlt
+                  : Images.ProfilePicAlt
+              }
+              style={styles.profilePic}
+            />
           </View>
 
           <View style={styles.headerTextContainer}>
             <Text style={styles.headerTitle}>Home</Text>
-            <Text style={styles.welcomeText}>Welcome back, John Brown!</Text>
+            {profile && (
+              <Text style={styles.welcomeText}>
+                Welcome back, {profile.firstname}!
+              </Text>
+            )}
           </View>
 
           <ScrollView
@@ -123,18 +162,9 @@ export default function HomeScreen() {
                   />
                   <Text style={styles.quickActionText}>Support</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push(Routes.Settings)}
-                >
-                  <MaterialIcons name="settings" size={24} color="#1F245E" />
-                  <Text style={styles.quickActionText}>Settings</Text>
-                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Important Links */}
             <View style={styles.actionsContainer}>
               <Text style={styles.sectionTitle}>Important Links</Text>
 
@@ -161,14 +191,6 @@ export default function HomeScreen() {
 
               <TouchableOpacity style={styles.navButton}>
                 <View style={styles.buttonContent}>
-                  <MaterialIcons name="calculate" size={24} color="white" />
-                  <Text style={styles.navButtonText}>Benefit Calculator</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#8C9EFF" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.navButton}>
-                <View style={styles.buttonContent}>
                   <MaterialIcons name="event" size={24} color="white" />
                   <Text style={styles.navButtonText}>Payment Schedule</Text>
                 </View>
@@ -176,16 +198,15 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Decorative Element */}
             <View style={styles.decorativeElement}>
               <View style={styles.decorativeLine} />
               <Text style={styles.decorativeText}>Pension Portal</Text>
               <View style={styles.decorativeLine} />
             </View>
 
-            {/* Add extra padding at the bottom to ensure all content is visible above tab bar */}
             <View style={{ paddingBottom: tabBarHeight + 20 }} />
           </ScrollView>
+
           <SideMenuDrawer
             visible={isDrawerVisible}
             onClose={() => setDrawerVisible(false)}
@@ -248,7 +269,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   dashboardCard: {
-    width: "48%",
+    flex: 1,
     borderRadius: 16,
     padding: 20,
     justifyContent: "center",
@@ -258,6 +279,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
+    marginHorizontal: 5,
   },
   card1: {
     backgroundColor: "#F0F4FF",
@@ -286,8 +308,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   quickActionButton: {
+    flex: 1,
+    marginHorizontal: 5,
     alignItems: "center",
-    width: "30%",
     padding: 15,
     borderRadius: 12,
     backgroundColor: "#F5F7FA",

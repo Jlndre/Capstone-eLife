@@ -56,7 +56,7 @@ export default function TabLayout() {
     >
       {/* Home tab (index.tsx) */}
       <Tabs.Screen
-        name="index"
+        name="Home"
         options={{
           title: "Home",
           tabBarIcon: ({ color, focused }) => (

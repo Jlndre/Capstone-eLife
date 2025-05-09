@@ -1,19 +1,21 @@
-import React, { useEffect, useRef } from 'react';
+import { Routes } from "@/constants/routes";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
+import React, { useEffect, useRef } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  Image,
-  Pressable,
   Animated,
   Dimensions,
-} from 'react-native';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-const screenWidth = Dimensions.get('window').width;
+const screenWidth = Dimensions.get("window").width;
 
 type Props = {
   visible: boolean;
@@ -25,9 +27,10 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
   const slideAnim = useRef(new Animated.Value(-screenWidth)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
-  const handleNavigate = (path: string) => {
-    onClose();
-    router.replace(path);
+  const handleLogout = async () => {
+    await SecureStore.deleteItemAsync("jwt"); // Clear the token
+    onClose(); // Close the drawer
+    router.replace(Routes.Login); // Navigate to Login
   };
 
   useEffect(() => {
@@ -64,22 +67,53 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
   }, [visible]);
 
   const menuItems = [
-    { icon: 'home-outline', text: 'Home', path: '/(tabs)', component: Ionicons },
-    { icon: 'check-circle-outline', text: 'My Profile', path: '/Profile', component: MaterialIcons },
-    { icon: 'document-text-outline', text: 'View Recent Life Certificates', path: '/(tabs)/ProofHistory', component: Ionicons },
-    { icon: 'notifications-outline', text: 'Notifications', path: '/Notification', component: Ionicons },
-    { icon: 'settings-outline', text: 'Settings', path: '/Settings', component: Ionicons },
+    {
+      icon: "home-outline",
+      text: "Home",
+      path: "/(tabs)" as const,
+      component: Ionicons,
+    },
+    {
+      icon: "check-circle-outline",
+      text: "My Profile",
+      path: "/Profile" as const,
+      component: MaterialIcons,
+    },
+    {
+      icon: "document-text-outline",
+      text: "View Recent Life Certificates",
+      path: "/PensionHistory" as const,
+      component: Ionicons,
+    },
+    {
+      icon: "notifications-outline",
+      text: "Notifications",
+      path: "/Notification" as const,
+      component: Ionicons,
+    },
+    {
+      icon: "settings-outline",
+      text: "Settings",
+      path: "/Settings" as const,
+      component: Ionicons,
+    },
   ];
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
+    <Modal
+      transparent
+      visible={visible}
+      animationType="none"
+      onRequestClose={onClose}
+    >
       <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
         {/* Dismiss drawer on backdrop press */}
         <Pressable style={styles.backdrop} onPress={onClose} />
 
         {/* Animated drawer */}
-        <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
-          
+        <Animated.View
+          style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}
+        >
           {/* X Close Button */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Ionicons name="close" size={28} color="#1F245E" />
@@ -89,7 +123,7 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
           <View style={styles.header}>
             <View style={styles.profileImageContainer}>
               <Image
-                source={require('../assets/images/profilepic.png')}
+                source={require("../assets/images/profilepic.png")}
                 style={styles.profilePic}
               />
             </View>
@@ -104,15 +138,28 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
             {menuItems.map((item, index) => (
               <TouchableOpacity
                 key={index}
-                onPress={() => handleNavigate(item.path)}
+                onPress={() => {
+                  onClose();
+                  router.replace(
+                    item.path as (typeof Routes)[keyof typeof Routes]
+                  );
+                }}
                 style={styles.menuItem}
                 activeOpacity={0.7}
               >
                 <View style={styles.iconContainer}>
                   {item.component === Ionicons ? (
-                    <Ionicons name={item.icon} size={22} color="#1F245E" />
+                    <Ionicons
+                      name={item.icon as keyof typeof Ionicons.glyphMap}
+                      size={22}
+                      color="#1F245E"
+                    />
                   ) : (
-                    <MaterialIcons name={item.icon} size={22} color="#1F245E" />
+                    <MaterialIcons
+                      name={item.icon as keyof typeof MaterialIcons.glyphMap}
+                      size={22}
+                      color="#1F245E"
+                    />
                   )}
                 </View>
                 <Text style={styles.menuText}>{item.text}</Text>
@@ -124,7 +171,7 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
           <View style={styles.bottomSection}>
             <View style={styles.divider} />
             <TouchableOpacity
-              onPress={() => handleNavigate('/Logout')}
+              onPress={handleLogout}
               style={styles.logoutButton}
               activeOpacity={0.7}
             >
@@ -141,16 +188,16 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: "rgba(0,0,0,0.5)",
   },
   backdrop: {
     flex: 1,
   },
   drawer: {
-    width: '80%',
-    height: '100%',
-    backgroundColor: '#fff',
-    position: 'absolute',
+    width: "80%",
+    height: "100%",
+    backgroundColor: "#fff",
+    position: "absolute",
     left: 0,
     top: 0,
     borderTopRightRadius: 20,
@@ -160,17 +207,17 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   closeButton: {
-    position: 'absolute',
+    position: "absolute",
     top: 55,
     left: 20,
     zIndex: 100,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 20,
     padding: 8,
     elevation: 5,
   },
   header: {
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: 20,
     marginBottom: 20,
     paddingHorizontal: 20,
@@ -178,61 +225,61 @@ const styles = StyleSheet.create({
   profileImageContainer: {
     padding: 3,
     borderRadius: 45,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     elevation: 5,
   },
   profilePic: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    borderColor: '#1F245E',
+    borderColor: "#1F245E",
     borderWidth: 2,
   },
   name: {
     fontSize: 22,
     marginTop: 15,
-    fontWeight: 'bold',
-    color: '#1F245E',
+    fontWeight: "bold",
+    color: "#1F245E",
   },
   subtitle: {
     fontSize: 14,
-    color: '#666',
+    color: "#666",
     marginTop: 3,
   },
   divider: {
     height: 1,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: "#e0e0e0",
     marginHorizontal: 20,
   },
   menuContainer: {
     marginTop: 30,
   },
   menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 12,
     paddingHorizontal: 30,
     marginVertical: 4,
   },
   iconContainer: {
     width: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   menuText: {
     fontSize: 16,
     marginLeft: 12,
-    color: '#1F245E',
-    fontWeight: '500',
+    color: "#1F245E",
+    fontWeight: "500",
   },
   bottomSection: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 50,
-    width: '100%',
+    width: "100%",
   },
   logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 20,
     paddingVertical: 12,
     paddingHorizontal: 30,
@@ -240,7 +287,7 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 16,
     marginLeft: 12,
-    color: '#ff3b30',
-    fontWeight: '500',
+    color: "#ff3b30",
+    fontWeight: "500",
   },
 });

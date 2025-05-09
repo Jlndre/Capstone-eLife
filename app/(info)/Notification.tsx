@@ -1,6 +1,8 @@
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+
 import React from "react";
 import {
   ScrollView,
@@ -80,7 +82,7 @@ export default function Notifications() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.replace("/(tabs)")}
+            onPress={() => router.replace(Routes.Home)}
           >
             <Ionicons name="arrow-back" size={24} color="#1F245E" />
           </TouchableOpacity>

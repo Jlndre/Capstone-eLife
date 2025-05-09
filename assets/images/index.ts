@@ -28,3 +28,34 @@ export const Images = {
   //ReactLogo3x: require('./react-logo@3x.png'),
   PartialReactLogo: require('./partial-react-logo.png'),
 };
+// At the bottom of Images.ts
+// Dynamically import A–Z profile photos
+export const ProfileInitials: Record<string, any> = {
+
+  A: require('./A.png'),
+  B: require('./B.png'),
+  C: require('./C.png'),
+  D: require('./D.png'),
+  E: require('./E.png'),
+  F: require('./F.png'),
+  G: require('./G.png'),
+  H: require('./H.png'),
+  I: require('./I.png'),
+  J: require('./J.png'),
+  K: require('./K.png'),
+  L: require('./L.png'),
+  M: require('./M.png'),
+  N: require('./N.png'),
+  O: require('./O.png'),
+  P: require('./P.png'),
+  Q: require('./Q.png'),
+  R: require('./R.png'),
+  S: require('./S.png'),
+  T: require('./T.png'),
+  U: require('./U.png'),
+  V: require('./V.png'),
+  W: require('./W.png'),
+  X: require('./X.png'),
+  Y: require('./Y.png'),
+  Z: require('./Z.png'),
+};
