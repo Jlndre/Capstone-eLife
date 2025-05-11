@@ -1,0 +1,66 @@
+# Node / Expo / React Native
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+expo-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# Kotlin / Android
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Debug
+*.pem
+
+# Python
+elife-backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.Python
+
+# Flask and local environment
+.env
+.env.*    # e.g. .env.dev, .env.local
+*.sqlite3
+instance/
+*.log
+
+# Firebase sensitive files
+elife-backend/firebase/firebase-config.json
+*.private.key
+*.cert
+# Firebase sensitive files
+elife-backend/firebase/serviceAccountKey.json
+
+# Optional examples or placeholder files
+app-example/
+# PyEnv local version file
+.python-version
+
+# Alembic migrations (optional)
+elife-backend/migrations/
+
+# Torch / model downloads (optional if stored locally)
+~/.EasyOCR/
+~/.torch/
