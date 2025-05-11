@@ -119,16 +119,19 @@ const LoginScreen: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://10.22.17.226:5001/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pensioner_number: credentials.userId.replace(/-/g, ""), // Cleaned format
-          password: credentials.password,
-        }),
-      });
+      const response = await fetch(
+        "https://b018-63-143-118-227.ngrok-free.app/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pensioner_number: credentials.userId.replace(/-/g, ""), // Cleaned format
+            password: credentials.password,
+          }),
+        }
+      );
 
       const text = await response.text();
       console.log("RAW RESPONSE:", text); // Debug HTML vs JSON

@@ -45,9 +45,12 @@ export default function HomeScreen() {
     const fetchProfile = async () => {
       try {
         const token = await SecureStore.getItemAsync("jwt");
-        const res = await fetch("http://10.22.17.226:5001/profile", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(
+          "https://b018-63-143-118-227.ngrok-free.app/profile",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
         const data = await res.json();
         setProfile({
           firstname: data.details.firstname,

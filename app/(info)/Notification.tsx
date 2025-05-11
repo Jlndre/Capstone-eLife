@@ -1,10 +1,12 @@
 import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,53 +15,48 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+interface Notification {
+  id: number;
+  type: string;
+  message: string;
+  sent_at: string;
+  is_read: boolean;
+}
+
 export default function Notifications() {
   const router = useRouter();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Static sample notifications data
-  const notifications = [
-    {
-      id: 1,
-      type: "reminder",
-      title: "Quarterly Proof of Life",
-      message: "Time to submit your quarterly proof of life verification.",
-      date: "May 3, 2025",
-      read: false,
-    },
-    {
-      id: 2,
-      type: "update",
-      title: "Document Updated",
-      message: "Your will document has been successfully updated.",
-      date: "April 28, 2025",
-      read: true,
-    },
-    {
-      id: 3,
-      type: "alert",
-      title: "Beneficiary Change",
-      message:
-        "Your beneficiary settings were changed for your investment account.",
-      date: "April 15, 2025",
-      read: true,
-    },
-    {
-      id: 4,
-      type: "reminder",
-      title: "Password Update Recommended",
-      message: "It's been 90 days since your last password update.",
-      date: "April 10, 2025",
-      read: false,
-    },
-    {
-      id: 5,
-      type: "update",
-      title: "New Feature Available",
-      message: "Check out our new digital asset protection feature.",
-      date: "March 22, 2025",
-      read: true,
-    },
-  ];
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const token = await SecureStore.getItemAsync("jwt");
+
+        const response = await fetch(
+          "https://b018-63-143-118-227.ngrok-free.app/notifications",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Server responded with status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setNotifications(data);
+      } catch (err) {
+        console.error("Failed to load notifications", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchNotifications();
+  }, []);
 
   // Function to render the appropriate icon based on notification type
   const renderIcon = (type: string) => {
@@ -73,6 +70,10 @@ export default function Notifications() {
       default:
         return <Ionicons name="notifications" size={24} color="#1F245E" />;
     }
+  };
+
+  const formatTitle = (type: string) => {
+    return type.charAt(0).toUpperCase() + type.slice(1);
   };
 
   return (
@@ -89,7 +90,7 @@ export default function Notifications() {
           <Text style={styles.headerTitle}>Notifications</Text>
           <TouchableOpacity
             style={styles.settingsButton}
-            onPress={() => router.push("/")}
+            onPress={() => router.push(Routes.Settings)}
           >
             <Ionicons name="settings-outline" size={24} color="#1F245E" />
           </TouchableOpacity>
@@ -100,13 +101,18 @@ export default function Notifications() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollViewContent}
         >
-          {notifications.length > 0 ? (
+          {loading ? (
+            <View style={styles.emptyContainer}>
+              <ActivityIndicator size="large" color="#8C9EFF" />
+              <Text style={styles.emptyText}>Loading notifications...</Text>
+            </View>
+          ) : notifications.length > 0 ? (
             notifications.map((notification) => (
               <TouchableOpacity
                 key={notification.id}
                 style={[
                   styles.notificationItem,
-                  !notification.read && styles.unreadNotification,
+                  !notification.is_read && styles.unreadNotification,
                 ]}
               >
                 <View style={styles.iconContainer}>
@@ -114,16 +120,16 @@ export default function Notifications() {
                 </View>
                 <View style={styles.notificationContent}>
                   <Text style={styles.notificationTitle}>
-                    {notification.title}
+                    {formatTitle(notification.type)}
                   </Text>
                   <Text style={styles.notificationMessage}>
                     {notification.message}
                   </Text>
                   <Text style={styles.notificationDate}>
-                    {notification.date}
+                    {notification.sent_at}
                   </Text>
                 </View>
-                {!notification.read && <View style={styles.unreadDot} />}
+                {!notification.is_read && <View style={styles.unreadDot} />}
               </TouchableOpacity>
             ))
           ) : (

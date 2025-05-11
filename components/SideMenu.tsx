@@ -1,8 +1,9 @@
+import { ProfileInitials } from "@/assets/images";
 import { Routes } from "@/constants/routes";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -22,15 +23,21 @@ type Props = {
   onClose: () => void;
 };
 
+type ProfileData = {
+  firstname: string;
+  lastname: string;
+};
+
 export default function SideMenuDrawer({ visible, onClose }: Props) {
   const router = useRouter();
   const slideAnim = useRef(new Animated.Value(-screenWidth)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  const [profile, setProfile] = useState<ProfileData | null>(null);
 
   const handleLogout = async () => {
-    await SecureStore.deleteItemAsync("jwt"); // Clear the token
-    onClose(); // Close the drawer
-    router.replace(Routes.Login); // Navigate to Login
+    await SecureStore.deleteItemAsync("jwt");
+    onClose();
+    router.replace(Routes.Login);
   };
 
   useEffect(() => {
@@ -50,6 +57,26 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
           useNativeDriver: true,
         }),
       ]).start();
+
+      const fetchProfile = async () => {
+        try {
+          const token = await SecureStore.getItemAsync("jwt");
+          const res = await fetch(
+            "https://b018-63-143-118-227.ngrok-free.app/profile",
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          const data = await res.json();
+          setProfile({
+            firstname: data.details.firstname,
+            lastname: data.details.lastname,
+          });
+        } catch (error) {
+          console.error("Failed to load profile", error);
+        }
+      };
+      fetchProfile();
     } else {
       Animated.parallel([
         Animated.timing(slideAnim, {
@@ -99,6 +126,11 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
     },
   ];
 
+  const profileLetter = profile?.firstname?.charAt(0).toUpperCase() || "A";
+  const profileImage =
+    ProfileInitials[profileLetter] ||
+    require("../assets/images/profilepic.png");
+
   return (
     <Modal
       transparent
@@ -107,33 +139,27 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
       onRequestClose={onClose}
     >
       <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
-        {/* Dismiss drawer on backdrop press */}
         <Pressable style={styles.backdrop} onPress={onClose} />
 
-        {/* Animated drawer */}
         <Animated.View
           style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}
         >
-          {/* X Close Button */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Ionicons name="close" size={28} color="#1F245E" />
           </TouchableOpacity>
 
-          {/* Header Profile Section */}
           <View style={styles.header}>
             <View style={styles.profileImageContainer}>
-              <Image
-                source={require("../assets/images/profilepic.png")}
-                style={styles.profilePic}
-              />
+              <Image source={profileImage} style={styles.profilePic} />
             </View>
-            <Text style={styles.name}>John Brown</Text>
+            <Text style={styles.name}>
+              {profile ? `${profile.firstname} ${profile.lastname}` : ""}
+            </Text>
             <Text style={styles.subtitle}>Pensioner</Text>
           </View>
 
           <View style={styles.divider} />
 
-          {/* Menu Links */}
           <View style={styles.menuContainer}>
             {menuItems.map((item, index) => (
               <TouchableOpacity
@@ -167,7 +193,6 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
             ))}
           </View>
 
-          {/* Bottom Section with Logout */}
           <View style={styles.bottomSection}>
             <View style={styles.divider} />
             <TouchableOpacity

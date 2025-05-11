@@ -97,8 +97,11 @@ class Notification(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     type = db.Column(db.String(50))  # e.g., 'reminder', 'approval', 'rejection'
     message = db.Column(db.Text)
+    target_quarter = db.Column(db.String(20))  # e.g., 'Q2-2025'
     sent_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_read = db.Column(db.Boolean, default=False)
+    push_token = db.Column(db.String(255))  
+
     
     def __repr__(self):
         return f'<Notification {self.id} for User {self.user_id}>'
@@ -134,3 +137,25 @@ class LoginSession(db.Model):
     
     def __repr__(self):
         return f'<LoginSession {self.id} for User {self.user_id}>'
+
+class QuarterVerification(db.Model):
+    __tablename__ = 'quarter_verifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    quarter = db.Column(db.String(10))  # e.g., Q1, Q2, Q3, Q4
+    year = db.Column(db.Integer)
+    status = db.Column(db.String(20), default='pending')  # pending, completed, missed
+    due_date = db.Column(db.Date)
+    verified_at = db.Column(db.DateTime)
+    proof_submission_id = db.Column(db.Integer, db.ForeignKey('proof_submissions.id'), nullable=True)
+
+    user = db.relationship('User', backref='quarter_verifications')
+    proof_submission = db.relationship('ProofSubmission', backref='quarter_verification', uselist=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'quarter', 'year', name='uq_user_quarter_year'),
+    )
+
+    def __repr__(self):
+        return f'<QuarterVerification {self.quarter}-{self.year} for User {self.user_id}>'

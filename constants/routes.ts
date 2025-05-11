@@ -20,5 +20,6 @@ export const Routes = {
   
     PensionHistory: '/PensionHistory',
     LiveAgent: '/live-agent',
+    VideoConference: '/video-conference',
   } as const;
   

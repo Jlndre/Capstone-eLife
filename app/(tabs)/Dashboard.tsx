@@ -1,12 +1,13 @@
-import { Images } from "@/assets/images";
+import { Images, ProfileInitials } from "@/assets/images";
+import { Routes } from "@/constants/routes";
 import { AntDesign, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
-  Dimensions,
   Image,
   ImageBackground,
   Modal,
@@ -20,14 +21,39 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import SideMenuDrawer from "../../components/SideMenu";
 
-const screenWidth = Dimensions.get("window").width;
-
-// ✅ Define type for quarters
 interface QuarterPreview {
-  ref: string;
   title: string;
   date: string;
 }
+
+interface QuarterData {
+  quarter: string;
+  due_date: string;
+  verified_at?: string;
+  status?: string;
+  year?: number;
+}
+
+// Reusable empty state component
+type EmptyStateCardProps = {
+  message: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+};
+
+const EmptyStateCard = ({
+  message,
+  icon = "calendar-outline",
+}: EmptyStateCardProps) => (
+  <View style={styles.emptyStateContainer}>
+    <Ionicons
+      name={icon}
+      size={40}
+      color="#ccc"
+      style={styles.emptyStateIcon}
+    />
+    <Text style={styles.noItemsText}>{message}</Text>
+  </View>
+);
 
 export default function DashboardScreen() {
   const tabBarHeight = useBottomTabBarHeight();
@@ -37,28 +63,127 @@ export default function DashboardScreen() {
   const [selectedQuarter, setSelectedQuarter] = useState<QuarterPreview | null>(
     null
   );
+  const [isDrawerVisible, setDrawerVisible] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [name, setName] = useState<string>("");
+  const [firstname, setFirstname] = useState<string>("");
+  const [year, setYear] = useState<number>(new Date().getFullYear());
+  const [accountStatus, setAccountStatus] = useState<"Active" | "Inactive">(
+    "Active"
+  );
+
   const [isCurrentQuarterCompleted, setIsCurrentQuarterCompleted] =
     useState(false);
-  const [isDrawerVisible, setDrawerVisible] = useState(false);
+  const [currentQuarter, setCurrentQuarter] = useState<QuarterData | null>(
+    null
+  );
+  const [upcomingQuarters, setUpcomingQuarters] = useState<QuarterData[]>([]);
+  const [completedQuarters, setCompletedQuarters] = useState<QuarterData[]>([]);
+  const [missedQuarters, setMissedQuarters] = useState<QuarterData[]>([]);
 
-  const handleVerifyClick = () => {
-    if (!isCurrentQuarterCompleted) {
-      router.push("/StartProcess");
+  // Combined past quarters for display
+  const pastQuarters = [...completedQuarters, ...missedQuarters].sort(
+    (a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
+  );
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    const token = await SecureStore.getItemAsync("jwt");
+    console.log("📦 Stored token:", token);
+
+    setIsLoading(true);
+    try {
+      const token = await SecureStore.getItemAsync("jwt");
+      const res = await fetch(
+        "https://b018-63-143-118-227.ngrok-free.app/api/dashboard-summary",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await res.json();
+      if (res.ok) {
+        setName(data.name);
+        // Extracting first name for profile image logic
+        setFirstname(data.name.split(" ")[0]);
+        setYear(data.year);
+        setAccountStatus(data.active ? "Active" : "Inactive");
+        setCurrentQuarter(data.current);
+        setUpcomingQuarters(data.upcoming);
+        setCompletedQuarters(data.completed);
+        setMissedQuarters(data.missed);
+        setIsCurrentQuarterCompleted(data.current?.status === "completed");
+      } else {
+        console.warn("Dashboard error:", data.message);
+        Alert.alert("Error", data.message || "Failed to load dashboard data");
+      }
+    } catch (err) {
+      console.error("Dashboard fetch error", err);
+      Alert.alert(
+        "Connection Error",
+        "Failed to connect to server. Please check your internet connection."
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleQuarterCompletion = () => {
-    setIsCurrentQuarterCompleted(true);
-    Alert.alert(
-      "Verification Complete",
-      "Your First Quarter life certificate has been successfully verified!"
-    );
+  const handleVerifyClick = () => {
+    if (!isCurrentQuarterCompleted && currentQuarter) {
+      router.push(Routes.StartProcess);
+    }
+  };
+
+  const handleQuarterCompletion = async () => {
+    try {
+      const token = await SecureStore.getItemAsync("user_token");
+      // Simulating API call to complete verification
+      // In production, this would be a real verification process
+      const res = await fetch(
+        `http://10.22.17.226:5001/api/test-complete/${currentQuarter?.quarter}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (res.ok) {
+        // Refresh dashboard data to show updated status
+        fetchDashboardData();
+        Alert.alert(
+          "Verification Complete",
+          `Your ${currentQuarter?.quarter} Quarter life certificate has been successfully verified!`
+        );
+      } else {
+        const error = await res.json();
+        Alert.alert(
+          "Error",
+          error.message || "Failed to complete verification"
+        );
+      }
+    } catch (err) {
+      console.error("Verification error", err);
+      Alert.alert("Error", "Failed to complete verification process");
+    }
   };
 
   const handleUpcomingQuarterClick = (item: QuarterPreview) => {
     setSelectedQuarter(item);
     setModalVisible(true);
   };
+
+  // Getting profile image based on first letter of first name
+  const profileLetter = firstname?.charAt(0).toUpperCase() || "A";
+  const profileImage = ProfileInitials[profileLetter] || Images.ProfilePicAlt;
 
   return (
     <>
@@ -74,137 +199,206 @@ export default function DashboardScreen() {
             <Pressable onPress={() => setDrawerVisible(true)}>
               <Text style={styles.hamburger}>☰</Text>
             </Pressable>
-            <Image source={Images.ProfilePicAlt} style={styles.profilePic} />
+            <Image source={profileImage} style={styles.profilePic} />
           </View>
 
-          {/* Header Text */}
           <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>Dashboard</Text>
-            <Text style={styles.trnText}>TRN XXX-XXX-000</Text>
+            <Text style={styles.headerTitle}>{year}</Text>
+            <Text style={styles.yearText}>Nice to have you, {firstname}!</Text>
           </View>
 
-          {/* Scrollable Content */}
           <ScrollView
             style={styles.scrollView}
             contentContainerStyle={styles.scrollViewContent}
             showsVerticalScrollIndicator={false}
           >
+            {accountStatus === "Inactive" && (
+              <Text style={styles.inactiveAlert}>
+                ⚠ Your account is inactive due to missed verifications.
+              </Text>
+            )}
+
             {/* Current Certificate */}
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>
-                  Current Quarter Certificate
+                  Current Quarter Verification
                 </Text>
                 <TouchableOpacity>
-                  <MaterialIcons name="more-vert" size={20} color="#999" />
+                  <MaterialIcons
+                    name="refresh"
+                    size={20}
+                    color="#999"
+                    onPress={fetchDashboardData}
+                  />
                 </TouchableOpacity>
               </View>
               <View style={styles.underline} />
-              {isCurrentQuarterCompleted ? (
-                <View style={styles.completedCertificate}>
-                  <View style={styles.certificateInfo}>
-                    <Text style={styles.certificateInfoText}>
-                      REF#123456 AGP/B1234{"\n"}First Quarter
-                    </Text>
-                    <View style={styles.doneTagContainer}>
-                      <AntDesign name="checkcircle" size={18} color="#4CAF50" />
-                      <Text style={styles.doneTagText}>Completed</Text>
+              {currentQuarter ? (
+                isCurrentQuarterCompleted ? (
+                  <View style={styles.completedCertificate}>
+                    <View style={styles.certificateInfo}>
+                      <Text style={styles.certificateInfoText}>
+                        {currentQuarter?.quarter} Quarter {year}
+                      </Text>
+                      <View style={styles.doneTagContainer}>
+                        <AntDesign
+                          name="checkcircle"
+                          size={18}
+                          color="#4CAF50"
+                        />
+                        <Text style={styles.doneTagText}>Completed</Text>
+                      </View>
                     </View>
-                  </View>
-                  <Text style={styles.completedDateText}>
-                    Verified on: 01/15/2025
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={styles.certificateBtn}
-                    onPress={handleVerifyClick}
-                  >
-                    <Text style={styles.certificateBtnText}>
-                      REF#123456 AGP/B1234{"\n"}First Quarter - Click to Verify
+                    <Text style={styles.completedDateText}>
+                      Verified on: {currentQuarter?.verified_at}
                     </Text>
-                  </TouchableOpacity>
-                  <View style={styles.actionRow}>
-                    <Text style={styles.dueText}>Due on: 01/31/2025</Text>
+                  </View>
+                ) : (
+                  <>
                     <TouchableOpacity
-                      style={styles.demoButton}
-                      onPress={handleQuarterCompletion}
+                      style={styles.certificateBtn}
+                      onPress={handleVerifyClick}
+                      disabled={!currentQuarter}
                     >
-                      <Text style={styles.demoButtonText}>
-                        Demo: Mark as Complete
+                      <Text style={styles.certificateBtnText}>
+                        {currentQuarter?.quarter} Quarter {year} - Click to
+                        Verify
                       </Text>
                     </TouchableOpacity>
-                  </View>
-                </>
+                    <View style={styles.actionRow}>
+                      <Text style={styles.dueText}>
+                        Due by: {currentQuarter?.due_date}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.demoButton}
+                        onPress={handleQuarterCompletion}
+                      >
+                        <Text style={styles.demoButtonText}>
+                          Test Verification
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )
+              ) : (
+                <EmptyStateCard
+                  message="No verification required for this quarter."
+                  icon="checkmark-circle-outline"
+                />
               )}
             </View>
 
-            {/* Upcoming Certificates */}
+            {/* Upcoming */}
             <View style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>
-                  Upcoming Life Certificate Uploads
-                </Text>
+                <Text style={styles.cardTitle}>Upcoming Verifications</Text>
                 <TouchableOpacity>
-                  <MaterialIcons name="more-vert" size={20} color="#999" />
+                  <MaterialIcons name="calendar-today" size={20} color="#999" />
                 </TouchableOpacity>
               </View>
               <View style={styles.underline} />
-              {[
-                {
-                  ref: "123457",
-                  title: "Second Quarter",
-                  date: "opens on: 04/01/2024",
-                },
-                {
-                  ref: "123458",
-                  title: "Third Quarter",
-                  date: "opens on: 07/01/2024",
-                },
-                {
-                  ref: "123459",
-                  title: "Final Quarter",
-                  date: "opens on: 10/01/2024",
-                },
-              ].map((item, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.upcomingCertificate}
-                  onPress={() => handleUpcomingQuarterClick(item)}
-                >
-                  <Text style={styles.upcomingCertificateText}>
-                    REF#{item.ref} AGP/B1234{"\n"}
-                    {item.title}
-                  </Text>
-                  <Text style={styles.upcomingDateText}>{item.date}</Text>
-                </TouchableOpacity>
-              ))}
+              {upcomingQuarters.length > 0 ? (
+                upcomingQuarters.map((item, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.upcomingCertificate}
+                    onPress={() =>
+                      handleUpcomingQuarterClick({
+                        title: `${item.quarter} Quarter`,
+                        date: `opens on: ${item.due_date}`,
+                      })
+                    }
+                  >
+                    <Text style={styles.upcomingCertificateText}>
+                      {item.quarter} Quarter {item.year || year}
+                    </Text>
+                    <Text style={styles.upcomingDateText}>
+                      Opens on: {item.due_date}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <EmptyStateCard
+                  message="No upcoming verifications left for this year."
+                  icon="time-outline"
+                />
+              )}
             </View>
 
-            {/* Past Certificates (if completed) */}
-            {isCurrentQuarterCompleted && (
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>Past Life Certificates</Text>
-                  <TouchableOpacity>
-                    <MaterialIcons name="more-vert" size={20} color="#999" />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.underline} />
-                <Text style={styles.noItemsText}>
-                  No previous certificates to display yet.
-                </Text>
+            {/* Past Certificates - Combined */}
+            <View style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Past Verifications</Text>
+                <TouchableOpacity>
+                  <MaterialIcons name="history" size={20} color="#999" />
+                </TouchableOpacity>
               </View>
-            )}
+              <View style={styles.underline} />
+              {pastQuarters.length > 0 ? (
+                pastQuarters.map((q, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.pastCertificate,
+                      q.status === "completed"
+                        ? styles.completedCertificate
+                        : styles.missedCertificate,
+                    ]}
+                  >
+                    <View style={styles.certificateInfo}>
+                      <Text style={styles.certificateInfoText}>
+                        {q.quarter} Quarter {q.year || year}
+                      </Text>
+                      <View
+                        style={[
+                          styles.statusTagContainer,
+                          q.status === "completed"
+                            ? styles.completedTagContainer
+                            : styles.missedTagContainer,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusTag,
+                            q.status === "completed"
+                              ? styles.completedTag
+                              : styles.missedTag,
+                          ]}
+                        >
+                          {q.status === "completed" ? "Completed" : "Missed"}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text
+                      style={[
+                        styles.statusDateText,
+                        q.status === "completed"
+                          ? styles.completedDateText
+                          : styles.missedDateText,
+                      ]}
+                    >
+                      {q.status === "completed"
+                        ? `Verified on: ${q.verified_at}`
+                        : `Missed deadline: ${q.due_date}`}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <EmptyStateCard
+                  message="You haven't proved you're alive this year"
+                  icon="folder-outline"
+                />
+              )}
+            </View>
 
             <View style={{ paddingBottom: tabBarHeight + 20 }} />
           </ScrollView>
 
-          {/* Modal */}
+          {/* Modal for Upcoming Quarter */}
           <Modal
             animationType="fade"
-            transparent={true}
+            transparent
             visible={modalVisible}
             onRequestClose={() => setModalVisible(false)}
           >
@@ -224,15 +418,12 @@ export default function DashboardScreen() {
                     style={styles.modalIcon}
                   />
                   <Text style={styles.modalText}>
-                    {selectedQuarter ? selectedQuarter.title : ""} is not open
-                    for verification yet.
+                    {selectedQuarter?.title || ""} is not open for verification
+                    yet.
                   </Text>
                   <Text style={styles.modalDate}>
                     It will be available on{" "}
-                    {selectedQuarter
-                      ? selectedQuarter.date.replace("opens on: ", "")
-                      : ""}
-                    .
+                    {selectedQuarter?.date.replace("opens on: ", "") || ""}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -259,7 +450,7 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   backgroundImage: {
     flex: 1,
-    width: screenWidth,
+    width: "100%",
     backgroundColor: "#F6F6F6",
   },
   safeArea: {
@@ -292,9 +483,20 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#0B1741",
   },
-  trnText: {
+  yearText: {
     color: "#808080",
     fontSize: 14,
+  },
+  inactiveAlert: {
+    color: "#d32f2f",
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 10,
+    backgroundColor: "rgba(255,220,220,0.7)",
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#f44336",
   },
   scrollView: {
     flex: 1,
@@ -321,13 +523,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: "right",
   },
-  completedCertificate: {
-    backgroundColor: "#f0f7f0",
+  pastCertificate: {
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
+  },
+  completedCertificate: {
+    backgroundColor: "#f0f7f0",
     borderColor: "#c8e6c9",
+  },
+  missedCertificate: {
+    backgroundColor: "#fff0f0",
+    borderColor: "#ffcdd2",
   },
   certificateInfo: {
     flexDirection: "row",
@@ -353,11 +561,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 4,
   },
-  completedDateText: {
+  statusTagContainer: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  completedTagContainer: {
+    backgroundColor: "#e8f5e9",
+  },
+  missedTagContainer: {
+    backgroundColor: "#ffebee",
+  },
+  statusTag: {
+    fontWeight: "600",
     fontSize: 14,
+  },
+  completedTag: {
     color: "#4CAF50",
+  },
+  missedTag: {
+    color: "#F44336",
+  },
+  statusDateText: {
+    fontSize: 14,
     textAlign: "right",
     marginTop: 4,
+    fontStyle: "italic",
+  },
+  completedDateText: {
+    color: "#4CAF50",
+  },
+  missedDateText: {
+    color: "#d32f2f",
   },
   card: {
     backgroundColor: "#fff",
@@ -423,7 +658,15 @@ const styles = StyleSheet.create({
     color: "#888",
     fontStyle: "italic",
     textAlign: "center",
+    paddingVertical: 10,
+  },
+  emptyStateContainer: {
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 20,
+  },
+  emptyStateIcon: {
+    marginBottom: 10,
   },
   // Modal Styles
   centeredView: {
