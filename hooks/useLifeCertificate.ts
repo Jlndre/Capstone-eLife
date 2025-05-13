@@ -57,12 +57,13 @@ export const useLifeCertificate = () => {
       // 3. Update quarter verification status if needed (this might be handled server-side)
       await updateQuarterVerification(token, result.certificate.proof_submission_id);
       
-      // 4. Update user permissions
-      await updateUserPermissions(token);
+      // 4. Update user permissions with certificate ID
+      await updateUserPermissions(token, result.certificate.id);
       
       return result.certificate;
     } catch (err) {
       console.error("Failed to generate and update certificate:", err);
+      setError(err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
       setIsGenerating(false);
@@ -120,8 +121,10 @@ export const useLifeCertificate = () => {
   
   /**
    * Update the user's permissions in the app
+   * @param token - JWT authentication token
+   * @param certificateId - The ID of the generated certificate
    */
-  const updateUserPermissions = async (token: string) => {
+  const updateUserPermissions = async (token: string, certificateId: number) => {
     try {
       const response = await fetch(
         "https://b018-63-143-118-227.ngrok-free.app/update-permissions",
@@ -132,6 +135,7 @@ export const useLifeCertificate = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            certificate_id: certificateId,
             permissions: ["access_funds", "view_certificate", "trade_assets"],
           }),
         }

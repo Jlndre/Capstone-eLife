@@ -10,6 +10,8 @@ class ProofStatus(Enum):
     APPROVED = 'approved'
     FLAGGED = 'flagged'
 
+# Add this to your User model in models.py
+
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
 
@@ -21,6 +23,12 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(20), default='pensioner')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     terms_accepted = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)  # Add this line
+    
+    # If you want to store the permissions array
+    permissions = db.Column(JSON, default=lambda: ["view_certificate"])  # Add this line
+
+    # Rest of your model remains the same...
 
 
     # Relationships
