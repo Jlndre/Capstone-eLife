@@ -1,3 +1,4 @@
+import hashlib
 import traceback
 from flask import Blueprint, json, request, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
@@ -1235,5 +1236,139 @@ def update_quarter_verification(current_user):
         return jsonify({
             "success": False,
             "message": "Failed to update quarter verification",
+            "error": str(e)
+        }), 500
+    
+@csrf.exempt
+@auth.route("/update-account-status", methods=["POST"])
+@token_required
+def update_account_status(current_user):
+    """
+    Update the account status after viewing a life certificate
+    """
+    try:
+        data = request.get_json()
+        certificate_id = data.get('certificate_id')
+        
+        if not certificate_id:
+            return jsonify({
+                "success": False,
+                "message": "Certificate ID is required"
+            }), 400
+            
+        # Find the certificate
+        certificate = DigitalCertificate.query.filter_by(
+            id=certificate_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not certificate:
+            return jsonify({
+                "success": False,
+                "message": "Certificate not found"
+            }), 404
+            
+        # Update user's verification status
+        user_details = current_user.user_details
+        if user_details:
+            user_details.last_verification = datetime.utcnow()
+            
+        # Log this certificate view
+        print(f"Life certificate {certificate_id} viewed by user {current_user.id}")
+        
+        # Create a notification for the user
+        notification = Notification(
+            user_id=current_user.id,
+            type="certificate_viewed",
+            message=f"Your Life Certificate for {certificate.quarter} has been viewed",
+            sent_at=datetime.utcnow(),
+            is_read=False
+        )
+        
+        db.session.add(notification)
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "Account status updated successfully"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print("Error updating account status:", str(e))
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Failed to update account status",
+            "error": str(e)
+        }), 500
+
+@csrf.exempt
+@auth.route("/update-permissions", methods=["POST"])
+@token_required
+def update_user_permissions(current_user):
+    """
+    Update user permissions after life certificate verification
+    """
+    try:
+        data = request.get_json()
+        certificate_id = data.get('certificate_id')
+        
+        if not certificate_id:
+            return jsonify({
+                "success": False,
+                "message": "Certificate ID is required"
+            }), 400
+            
+        # Find the certificate
+        certificate = DigitalCertificate.query.filter_by(
+            id=certificate_id
+        ).first()
+        
+        if not certificate:
+            return jsonify({
+                "success": False,
+                "message": "Certificate not found"
+            }), 404
+            
+        # Update the user's active status
+        user = User.query.get(certificate.user_id)
+        if user:
+            user.is_active = True
+            
+            # You might want to set additional permissions here
+            # For example, if your User model has a permissions field:
+            # user.permissions = "verified_user"
+            
+        quarter_parts = certificate.quarter.split('-')
+        if len(quarter_parts) == 2:
+            quarter_num = quarter_parts[0]
+            year = int(quarter_parts[1])
+            
+            # Update quarter verification status
+            quarter_verification = QuarterVerification.query.filter_by(
+                user_id=certificate.user_id,
+                quarter=quarter_num,
+                year=year
+            ).first()
+            
+            if quarter_verification:
+                quarter_verification.status = 'completed'
+                quarter_verification.verified_at = datetime.utcnow()
+                
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "User permissions updated successfully"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print("Error updating user permissions:", str(e))
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Failed to update user permissions",
             "error": str(e)
         }), 500
