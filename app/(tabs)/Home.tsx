@@ -122,7 +122,7 @@ export default function HomeScreen() {
                 <MaterialIcons name="history" size={32} color="#1F245E" />
                 <Text style={styles.cardTitle}>Pension History</Text>
                 <Text style={styles.cardSubtitle}>
-                  View your payment records
+                  View your old certificates
                 </Text>
               </TouchableOpacity>
 
@@ -195,7 +195,7 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.navButton}>
                 <View style={styles.buttonContent}>
                   <MaterialIcons name="event" size={24} color="white" />
-                  <Text style={styles.navButtonText}>Payment Schedule</Text>
+                  <Text style={styles.navButtonText}>Payments</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color="#8C9EFF" />
               </TouchableOpacity>

@@ -21,5 +21,6 @@ export const Routes = {
     PensionHistory: '/PensionHistory',
     LiveAgent: '/live-agent',
     VideoConference: '/video-conference',
+    Terms: '/Terms',
   } as const;
   

@@ -91,44 +91,40 @@ def detect_id_type(text: str) -> str:
     return "unknown"
 
 def extract_expiry_date(raw_text: str):
-    """Improved expiry date extraction with structured patterns, OCR noise handling, and timezone-aware comparisons."""
-    # Clean up OCR junk while preserving dashes, slashes, and common delimiters
-    clean_text = re.sub(r'[^a-zA-Z0-9/\- ,]', '', raw_text)
+    clean_text = re.sub(r'[^\w\s:/\-]', '', raw_text)
+    tokens = clean_text.split()
+    now = datetime.now(timezone.utc)
+    candidate_dates = []
+    expiry_keywords = ["expiry", "expires", "expiration", "exp", "valid", "validity"]
 
-    date_patterns = [
-        r'(20\d{2})-(\d{2})-(\d{2})',                        # ISO format: 2027-07-29
-        r'(\d{2})/(\d{2})/(\d{4})',                          # 29/07/2027
-        r'(\d{2})-(\d{2})-(\d{4})',                          # 29-07-2027
-        r'(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{4})',  # 29 July 2027
-        r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}',     # July 29, 2027
-    ]
-
-    print(f"Trying to parse expiry from: {clean_text}")
-
-    for pattern in date_patterns:
-        match = re.search(pattern, clean_text)
-        if match:
+    for i, token in enumerate(tokens):
+        if token.lower() in expiry_keywords and i + 1 < len(tokens):
             try:
-                date_str = match.group(0)
-                print(f"Pattern matched: {pattern} -> {date_str}")
-                parsed_date = parse(date_str, fuzzy=False)
-                parsed_date = parsed_date.replace(tzinfo=timezone.utc)  # Make it timezone-aware
-                if 2000 <= parsed_date.year <= 2100 and parsed_date > datetime.now(timezone.utc):
-                    return parsed_date
-            except Exception as e:
-                print(f"Parse failed for: {match.group(0)} -> {e}")
+                parsed = parse(tokens[i + 1], fuzzy=False).replace(tzinfo=timezone.utc)
+                if parsed > now:
+                    return parsed
+            except:
                 continue
 
-    # Fallback to fuzzy parsing of the whole string
-    try:
-        parsed_date = parse(clean_text, fuzzy=True)
-        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
-        if 2000 <= parsed_date.year <= 2100 and parsed_date > datetime.now(timezone.utc):
-            return parsed_date
-    except Exception as e:
-        print("Fallback parse failed:", e)
+    date_patterns = [
+        r'(20\d{2})[-/](\d{2})[-/](\d{2})',
+        r'(\d{2})[-/](\d{2})[-/](\d{4})',
+        r'(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{4})',
+        r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}',
+    ]
 
-    return None
+    for pattern in date_patterns:
+        matches = re.findall(pattern, clean_text)
+        for match in matches:
+            try:
+                date_str = " ".join(match) if isinstance(match, tuple) else match
+                parsed = parse(date_str, fuzzy=True).replace(tzinfo=timezone.utc)
+                if parsed > now:
+                    candidate_dates.append(parsed)
+            except:
+                continue
+
+    return max(candidate_dates) if candidate_dates else None
 
 @csrf.exempt
 @auth.route("/login", methods=["POST"])
@@ -573,7 +569,6 @@ def detect_face(current_user):
             "details": str(e)
         }), 500
 
-    
 @csrf.exempt
 @auth.route("/verify-id-upload", methods=["POST"])
 @token_required
@@ -588,20 +583,40 @@ def verify_id_upload(current_user):
         content_type = file.content_type
         filename = f"{uuid.uuid4()}_{file.filename}"
 
-        bucket = storage.bucket()
-        blob = bucket.blob(f"id_uploads/{filename}")
-        blob.upload_from_file(file, content_type=content_type)
-        blob.make_public()
-        image_url = blob.public_url
-        print("Uploaded to Firebase:", image_url)
-
         file.stream.seek(0)
         npimg = np.frombuffer(file.read(), np.uint8)
         image = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
 
+        # Deepfake detection on cropped face
+        from app.services.deepfake_detector import is_deepfake
+        is_fake, face_crop = is_deepfake(image)
+        print("IS your ID Fake:", is_fake)
+        if is_fake is None:
+            return jsonify({'message': 'Face detection failed or no face found in ID image.'}), 400
+
+        if is_fake:
+            return jsonify({
+                'message': 'Upload rejected: The face on this ID appears to be tampered or synthetic.',
+                'deepfake_detected': True
+            }), 400
+
+        # Upload cropped face to Firebase
+        bucket = storage.bucket()
+        face_filename = f"{uuid.uuid4()}_face_crop.jpg"
+        _, buffer = cv2.imencode('.jpg', face_crop)
+        face_blob = bucket.blob(f"id_faces/{face_filename}")
+        face_blob.upload_from_string(buffer.tobytes(), content_type="image/jpeg")
+        face_blob.make_public()
+        face_image_url = face_blob.public_url
+        print("Uploaded cropped face to Firebase:", face_image_url)
+
+        # OCR
         try:
             reader = easyocr.Reader(['en'], gpu=False)
-            result = reader.readtext(image)
+            resized = cv2.resize(image, (600, 400))  # Speed up OCR
+            result = reader.readtext(resized)
+
+            print("Proceeding to OCR and text validation...")
         except Exception as e:
             return jsonify({'message': f'OCR processing failed: {str(e)}'}), 500
 
@@ -615,14 +630,13 @@ def verify_id_upload(current_user):
                 "message": "Please complete your profile before uploading ID."
             }), 400
 
-        # Tokenize and normalize OCR text
+        # Normalize OCR text
         tokens = re.findall(r'[a-zA-Z]+', extracted_text.lower())
         normalized_text = " ".join(tokens)
         flat_text = normalized_text.replace(" ", "")
         print("OCR Tokens:", tokens)
         print("Normalized OCR Text:", normalized_text)
 
-        # Normalize expected name components
         first = re.sub(r'[^a-zA-Z0-9]', '', user_details.firstname).lower()
         last = re.sub(r'[^a-zA-Z0-9]', '', user_details.lastname).lower()
 
@@ -633,13 +647,10 @@ def verify_id_upload(current_user):
             f"{last} {first}"
         ]
 
-        # Fuzzy name match
         name_match = any(
             fuzz.token_set_ratio(expected, normalized_text) > 80
             for expected in expected_names
         )
-
-        # Fallback: plain substring match
         if not name_match:
             name_match = first in flat_text and last in flat_text
 
@@ -656,17 +667,17 @@ def verify_id_upload(current_user):
 
         id_match = expected_id_number and expected_id_number in extracted_text
 
-        expiry_date = extract_expiry_date(extracted_text)  # Pass full raw text here
-
+        expiry_date = extract_expiry_date(extracted_text)
         print("Full Extracted Text:", extracted_text)
         print("Extracted expiry date:", expiry_date)
         print("Current UTC time:", datetime.now(timezone.utc))
 
         expiry_valid = expiry_date is not None
 
+        # Save submission with face image URL
         submission = ProofSubmission(
             user_id=current_user.id,
-            id_image_url=image_url,
+            id_image_url=face_image_url,
             status='pending',
             submitted_at=datetime.now(timezone.utc)
         )
@@ -677,7 +688,7 @@ def verify_id_upload(current_user):
             user_id=current_user.id,
             proof_submission_id=submission.id,
             type=id_type,
-            image_url=image_url,
+            image_url=face_image_url,
             expiry_date=expiry_date
         )
         db.session.add(doc)
@@ -855,3 +866,4 @@ def accept_terms(current_user):
     current_user.terms_accepted = True
     db.session.commit()
     return jsonify({"message": "Terms accepted"}), 200
+

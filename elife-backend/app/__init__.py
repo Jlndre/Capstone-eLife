@@ -6,8 +6,6 @@ from flask_wtf.csrf import CSRFProtect
 from flask_cors import CORS
 from app.config import Config
 
-
-
 import firebase_admin
 from firebase_admin import credentials, storage
 import os
@@ -41,6 +39,8 @@ def create_app():
     from app import views  # 👈 This runs the entire views.py file
     app.register_blueprint(views.auth)
 
-
+    # Register the certificate blueprint
+    from app.certificate import certificate_bp
+    app.register_blueprint(certificate_bp, url_prefix='/api')
 
     return app

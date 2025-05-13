@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Image,
   SafeAreaView,
@@ -35,7 +36,7 @@ const UploadPhotoIDScreen = () => {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        alert("We need permissions to access your photo library.");
+        Alert.alert("Permission Denied", "We need photo access permission.");
       }
     })();
   }, []);
@@ -59,7 +60,7 @@ const UploadPhotoIDScreen = () => {
   const pickFromCamera = async () => {
     const { status } = await Camera.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      alert("Camera permission is required!");
+      Alert.alert("Permission Required", "Camera permission is required!");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -124,50 +125,35 @@ const UploadPhotoIDScreen = () => {
       setFile(null);
 
       if (response.ok) {
-        // Check verification results from the backend
-        if (data.verification_result) {
-          const result = data.verification_result;
-
-          // Check for specific failures
-          if (!result.name_match) {
-            router.push({
-              pathname: Routes.UploadError,
-              params: { message: "Name does not match our records" },
-            });
-          } else if (!result.id_match) {
-            router.push({
-              pathname: Routes.UploadError,
-              params: { message: "Invalid ID number" },
-            });
-          } else if (!result.expiry_valid) {
-            router.push({
-              pathname: Routes.UploadError,
-              params: { message: "ID is expired" },
-            });
-          } else {
-            // All checks passed, go to success screen
-            router.push(Routes.UploadSuccess);
-          }
-        } else {
-          // Generic success if no specific verification result
+        // Check if verification was successful and proceed to facial verification
+        if (data.next_step === "facial_verification") {
           router.push(Routes.Step2Verification);
+        } else {
+          // If verification has issues, go to error screen
+          router.push({
+            pathname: Routes.UploadError,
+            params: {
+              message:
+                data.message ||
+                "Verification passed partially. Please try again or contact support.",
+            },
+          });
         }
       } else {
         // Handle API error response
         router.push({
           pathname: Routes.UploadError,
           params: {
-            message: data.message || "Verification failed. Please try again.",
+            message: data.message || "ID verification failed.",
           },
         });
       }
     } catch (error) {
       console.error("Upload error:", error);
       router.push({
-        pathname: Routes.CheckingUpload,
+        pathname: Routes.UploadError,
         params: {
-          message:
-            "Connection error. Please check your internet and try again.",
+          message: "Network error. Please check your connection.",
         },
       });
     } finally {
@@ -180,8 +166,8 @@ const UploadPhotoIDScreen = () => {
       <View style={styles.headerSection}>
         <Text style={styles.stepTitle}>Step 1: Upload Photo ID</Text>
         <Text style={styles.instruction}>
-          Please upload a valid government issued photo ID eg. NIDS Card,
-          National ID, Driver's License, Passport.
+          Please upload a valid government-issued photo ID (e.g., NIDS, Driver's
+          License, Passport).
         </Text>
         <View style={styles.curve}>
           <Svg height="100%" width="100%" viewBox="0 0 1440 320">
@@ -231,12 +217,10 @@ const UploadPhotoIDScreen = () => {
             color="white"
             style={{ marginRight: 8 }}
           />
-          <Text style={styles.uploadText}>Select Photo from Gallery</Text>
+          <Text style={styles.uploadText}>Select from Gallery</Text>
         </TouchableOpacity>
 
-        <Text style={styles.fileTypesText}>
-          Accepted Photo types: .png, .jpg
-        </Text>
+        <Text style={styles.fileTypesText}>Accepted types: .jpg, .png</Text>
 
         {file && (
           <View style={styles.filePreview}>
@@ -271,7 +255,6 @@ const UploadPhotoIDScreen = () => {
 
 export default UploadPhotoIDScreen;
 
-// Styles with additions for disabled state
 const styles = StyleSheet.create({
   container: {
     flex: 1,

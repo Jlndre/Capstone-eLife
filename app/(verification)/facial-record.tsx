@@ -1,3 +1,4 @@
+import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import {
   CameraPictureOptions,
@@ -32,22 +33,16 @@ export default function FacialRecord() {
   const cameraRef = useRef<any>(null);
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  // Add mounted ref to track component lifecycle
-  const isMountedRef = useRef(true);
-
-  // Use the permissions hook
   const [permission, requestPermission] = useCameraPermissions();
 
-  // State with proper typing
-  const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
-  const [faceDetected, setFaceDetected] = useState<boolean>(false);
-  const [isCapturing, setIsCapturing] = useState<boolean>(false);
-  const [captureCount, setCaptureCount] = useState<number>(0);
-  const [processing, setProcessing] = useState<boolean>(false);
-  const [checkingFace, setCheckingFace] = useState<boolean>(false);
-  const [showFaceDetection, setShowFaceDetection] = useState<boolean>(true);
-  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  // Component state
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [captureInProgress, setCaptureInProgress] = useState(false);
+  const [captureCount, setCaptureCount] = useState(0);
+  const [verificationInProgress, setVerificationInProgress] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [isMounted, setIsMounted] = useState(true);
 
   // Verification steps tracking
   const [verificationSteps, setVerificationSteps] = useState<
@@ -58,51 +53,6 @@ export default function FacialRecord() {
     { id: "face-match", title: "Identity Match", status: "pending" },
   ]);
 
-  // Face detection check interval
-  const faceDetectionIntervalRef = useRef<number | null>(null);
-
-  // Track timeouts to clear them on unmount
-  const timeoutRefsArray = useRef<number[]>([]);
-
-  // Safe setTimeout that we can clean up
-  const safeSetTimeout = (callback: () => void, delay: number) => {
-    const timeoutId = setTimeout(() => {
-      if (isMountedRef.current) {
-        callback();
-      }
-    }, delay);
-
-    timeoutRefsArray.current.push(timeoutId);
-    return timeoutId;
-  };
-
-  // Set mounted flag to false on unmount
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    return () => {
-      isMountedRef.current = false;
-
-      // Clear all timeouts on unmount
-      timeoutRefsArray.current.forEach(clearTimeout);
-      timeoutRefsArray.current = [];
-
-      // Clear interval if it exists
-      if (faceDetectionIntervalRef.current) {
-        clearInterval(faceDetectionIntervalRef.current);
-        faceDetectionIntervalRef.current = null;
-      }
-
-      // Stop camera operations if possible
-      if (cameraRef.current) {
-        // Some camera implementations have these methods
-        if (typeof cameraRef.current.pausePreview === "function") {
-          cameraRef.current.pausePreview();
-        }
-      }
-    };
-  }, []);
-
   // Fade in animation for UI elements
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -112,71 +62,97 @@ export default function FacialRecord() {
     }).start();
   }, [fadeAnim]);
 
-  // Safe navigation function to properly clean up before routing
-  const safeNavigate = (route: string) => {
-    // Clear all timeouts and intervals
-    timeoutRefsArray.current.forEach(clearTimeout);
-    timeoutRefsArray.current = [];
+  // Set component as unmounted on cleanup
+  useEffect(() => {
+    setIsMounted(true);
+    return () => {
+      setIsMounted(false);
+    };
+  }, []);
 
-    if (faceDetectionIntervalRef.current) {
-      clearInterval(faceDetectionIntervalRef.current);
-      faceDetectionIntervalRef.current = null;
-    }
+  useEffect(() => {
+    let faceDetectionInterval: ReturnType<typeof setInterval> | null = null;
+    let initialCheckTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    // Stop any ongoing camera operations
-    setIsCapturing(false);
-    setProcessing(false);
-    setCheckingFace(false);
-
-    // Pause camera if possible
     if (
-      cameraRef.current &&
-      typeof cameraRef.current.pausePreview === "function"
+      permission?.granted &&
+      isCameraReady &&
+      !faceDetected &&
+      !captureInProgress &&
+      !verificationInProgress
     ) {
-      cameraRef.current.pausePreview();
+      // Check for face every 2 seconds
+      faceDetectionInterval = setInterval(() => {
+        if (!faceDetected && !captureInProgress && !verificationInProgress) {
+          checkFaceDetection();
+        }
+      }, 2000);
+
+      // Initial check after a small delay
+      initialCheckTimeout = setTimeout(() => {
+        if (!faceDetected && !captureInProgress && !verificationInProgress) {
+          checkFaceDetection();
+        }
+      }, 500);
     }
 
-    // Now safe to navigate
-    router.replace(route);
+    // Cleanup
+    return () => {
+      if (faceDetectionInterval !== null) {
+        clearInterval(faceDetectionInterval);
+      }
+      if (initialCheckTimeout !== null) {
+        clearTimeout(initialCheckTimeout);
+      }
+    };
+  }, [
+    permission?.granted,
+    isCameraReady,
+    faceDetected,
+    captureInProgress,
+    verificationInProgress,
+  ]);
+
+  // Update verification step status
+  const updateVerificationStep = (
+    stepId: string,
+    status: VerificationStep["status"]
+  ) => {
+    if (!isMounted) return;
+
+    setVerificationSteps((steps) =>
+      steps.map((step) => (step.id === stepId ? { ...step, status } : step))
+    );
   };
 
   // Check for face detection using API
   const checkFaceDetection = async () => {
-    // Add camera ready check and mounted check
     if (
-      !isMountedRef.current ||
+      !isMounted ||
       !cameraRef.current ||
       !isCameraReady ||
-      checkingFace ||
-      isCapturing ||
-      processing
-    )
+      captureInProgress ||
+      verificationInProgress
+    ) {
       return;
+    }
 
     try {
-      setCheckingFace(true);
-
       // Take a photo to analyze
       const pictureOptions: CameraPictureOptions = {
-        quality: 0.5, // Lower quality for faster upload
-        skipProcessing: true, // Skip post-processing for speed
+        quality: 0.5,
+        skipProcessing: true,
+        base64: false,
+        exif: false,
       };
 
-      // Check mounted state before taking picture
-      if (!isMountedRef.current || !cameraRef.current) {
-        setCheckingFace(false);
+      let photo;
+      try {
+        photo = await cameraRef.current.takePictureAsync(pictureOptions);
+      } catch (err) {
+        console.error("Error taking picture for face detection:", err);
         return;
       }
-
-      const photo = await cameraRef.current.takePictureAsync(pictureOptions);
-
-      // Check mounted state after async operation
-      if (!isMountedRef.current) {
-        setCheckingFace(false);
-        return;
-      }
-
-      console.log("Captured photo for face detection:", photo?.uri);
 
       // Create form data for API request
       const formData = new FormData();
@@ -186,240 +162,188 @@ export default function FacialRecord() {
         name: "face-check.jpg",
       } as any);
 
-      // Replace with your actual face detection API
+      // Get JWT token for authentication
       const token = await SecureStore.getItemAsync("jwt");
 
-      // Check mounted state before fetch
-      if (!isMountedRef.current) {
-        setCheckingFace(false);
-        return;
-      }
+      // Add timeout to API call to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/detect-face",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        }
-      );
-
-      // Check mounted state after fetch
-      if (!isMountedRef.current) {
-        setCheckingFace(false);
-        return;
-      }
-
-      // Add error handling for API response
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("API error:", response.status, errorText);
-        setCheckingFace(false);
-        return;
-      }
-
-      const contentType = response.headers.get("Content-Type");
-      if (!contentType?.includes("application/json")) {
-        const text = await response.text();
-        console.error("Unexpected response type:", contentType, text);
-        setCheckingFace(false);
-        return;
-      }
-
-      const result = await response.json();
-
-      // Final mounted check before updating state
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      // Fixed: Better check for face detection result
-      if (
-        result.success &&
-        Array.isArray(result.faces) &&
-        result.faces.length > 0
-      ) {
-        const wasAlreadyDetected = faceDetected;
-        setFaceDetected(true);
-
-        // Update verification step status
-        updateVerificationStep("face-detection", "success");
-
-        // Only trigger automatic capture on initial detection
-        if (!wasAlreadyDetected) {
-          setShowFaceDetection(true);
-
-          // Clear the face detection interval - this is the key change
-          if (faceDetectionIntervalRef.current) {
-            clearInterval(faceDetectionIntervalRef.current);
-            faceDetectionIntervalRef.current = null;
+      try {
+        const response = await fetch(
+          "https://b018-63-143-118-227.ngrok-free.app/detect-face",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+            signal: controller.signal,
           }
+        );
 
-          // Show detection UI briefly, then start capturing
-          safeSetTimeout(() => {
-            if (!isMountedRef.current) return;
-            setShowFaceDetection(false);
-            captureImagesSequence(); // Automatically start capturing after face detection
-          }, 1500);
+        clearTimeout(timeoutId);
+
+        // Check if component is still mounted
+        if (!isMounted) return;
+
+        // Handle non-OK response
+        if (!response.ok) {
+          console.error("API error:", response.status);
+          return;
         }
-      } else {
-        setFaceDetected(false);
-        updateVerificationStep("face-detection", "pending");
+
+        const result = await response.json();
+
+        // Check if faces were detected
+        if (
+          result.success &&
+          Array.isArray(result.faces) &&
+          result.faces.length > 0
+        ) {
+          setFaceDetected(true);
+          updateVerificationStep("face-detection", "success");
+        } else {
+          setFaceDetected(false);
+          updateVerificationStep("face-detection", "pending");
+        }
+      } catch (error) {
+        console.error("Face detection network error:", error);
+
+        if (isMounted) {
+          setFaceDetected(false);
+          updateVerificationStep("face-detection", "pending");
+        }
       }
     } catch (error) {
       console.error("Face detection error:", error);
-      if (isMountedRef.current) {
+
+      if (isMounted) {
         setFaceDetected(false);
         updateVerificationStep("face-detection", "pending");
       }
-    } finally {
-      if (isMountedRef.current) {
-        setCheckingFace(false);
-      }
     }
   };
-
-  // Update a verification step status
-  const updateVerificationStep = (
-    stepId: string,
-    status: VerificationStep["status"]
-  ) => {
-    if (!isMountedRef.current) return;
-
-    setVerificationSteps((steps) =>
-      steps.map((step) => (step.id === stepId ? { ...step, status } : step))
-    );
-  };
-
-  // Set up periodic face detection
-  useEffect(() => {
-    // Only start face detection if nothing else is happening and we don't already have a face
-    if (
-      permission?.granted &&
-      !isCapturing &&
-      !processing &&
-      isCameraReady &&
-      !faceDetected &&
-      !faceDetectionIntervalRef.current &&
-      isMountedRef.current
-    ) {
-      // Check face detection every 2 seconds
-      faceDetectionIntervalRef.current = setInterval(() => {
-        if (isMountedRef.current) {
-          checkFaceDetection();
-        }
-      }, 2000);
-
-      // Initial check
-      safeSetTimeout(() => {
-        if (isMountedRef.current) {
-          checkFaceDetection();
-        }
-      }, 500);
-    }
-
-    return () => {
-      if (faceDetectionIntervalRef.current) {
-        clearInterval(faceDetectionIntervalRef.current);
-        faceDetectionIntervalRef.current = null;
-      }
-    };
-  }, [
-    permission?.granted,
-    isCapturing,
-    processing,
-    isCameraReady,
-    faceDetected,
-  ]);
 
   // Capture a sequence of images for verification
   const captureImagesSequence = async () => {
-    if (!isMountedRef.current || !cameraRef.current || !isCameraReady) return;
+    if (!isMounted || !cameraRef.current || !isCameraReady) return;
 
     try {
-      setIsCapturing(true);
+      setCaptureInProgress(true);
       setCaptureCount(0);
 
       // Reset verification steps
       updateVerificationStep("deepfake-check", "pending");
       updateVerificationStep("face-match", "pending");
 
-      const images = [];
-      const totalImages = 5; // We'll capture 5 images
+      const images: string[] = [];
+      const totalImages = 5;
 
-      // Capture images with delay between each
+      // Capture loop
       for (let i = 0; i < totalImages; i++) {
-        // Check if still mounted before each capture
-        if (!isMountedRef.current || !cameraRef.current) {
-          setIsCapturing(false);
+        if (!isMounted || !cameraRef.current) {
+          setCaptureInProgress(false);
           return;
         }
 
         const pictureOptions: CameraPictureOptions = {
           quality: 0.7,
+          skipProcessing: false,
+          base64: false,
+          exif: false,
         };
 
-        const photo = await cameraRef.current.takePictureAsync(pictureOptions);
-
-        // Check mounted state after async operation
-        if (!isMountedRef.current) {
-          setIsCapturing(false);
-          return;
-        }
-
-        images.push(photo.uri);
-        setCaptureCount(i + 1);
-
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        // Wait 1 second between captures if not the last image
-        if (i < totalImages - 1) {
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-              resolve();
-            }, 1000);
-            timeoutRefsArray.current.push(timeout);
+        try {
+          // Set a 3-second timeout for capture
+          const capturePromise =
+            cameraRef.current.takePictureAsync(pictureOptions);
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("Camera capture timeout")), 3000);
           });
 
-          // Check mounted state after delay
-          if (!isMountedRef.current) {
-            setIsCapturing(false);
+          // Race the capture against the timeout
+          const photo = await Promise.race([capturePromise, timeoutPromise]);
+
+          if (!isMounted) {
+            setCaptureInProgress(false);
+            return;
+          }
+
+          images.push(photo.uri);
+          setCaptureCount(i + 1);
+
+          // Wait between captures
+          if (i < totalImages - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+
+          if (!isMounted) {
+            setCaptureInProgress(false);
+            return;
+          }
+        } catch (err) {
+          console.error("Error taking picture for verification:", err);
+
+          // If we have at least one image, try to proceed, otherwise fail
+          if (images.length > 0) {
+            console.log(
+              `Proceeding with ${images.length} images instead of ${totalImages}`
+            );
+            break;
+          } else {
+            if (isMounted) {
+              setCaptureInProgress(false);
+              Alert.alert(
+                "Camera Error",
+                "Unable to capture verification images. Please try again."
+              );
+            }
             return;
           }
         }
       }
 
-      // Process the captured images
-      await processImages(images);
+      // Process the captured images if we have any
+      if (images.length > 0) {
+        await verifyImages(images);
+      } else {
+        throw new Error("No images were captured");
+      }
     } catch (error) {
       console.error("Capture sequence error:", error);
-      if (isMountedRef.current) {
-        Alert.alert("Error", "Failed to capture verification images");
-        setIsCapturing(false);
+
+      if (isMounted) {
+        Alert.alert(
+          "Verification Error",
+          "Failed to capture verification images. Please ensure good lighting and that your face is clearly visible."
+        );
+        setCaptureInProgress(false);
         resetVerificationProcess();
+      }
+    } finally {
+      if (isMounted) {
+        setCaptureInProgress(false);
       }
     }
   };
 
-  // Process the captured images
-  const processImages = async (imageUris: string[]) => {
-    if (!isMountedRef.current) return;
+  // Process the captured images and verify identity
+  const verifyImages = async (imageUris: string[]) => {
+    if (!isMounted) return;
 
     try {
-      setIsCapturing(false);
-      setProcessing(true);
+      setCaptureInProgress(false);
+      setVerificationInProgress(true);
 
-      // Update verification steps
+      // Update verification steps to processing
       updateVerificationStep("deepfake-check", "processing");
       updateVerificationStep("face-match", "processing");
 
       const token = await SecureStore.getItemAsync("jwt");
 
-      // Check mounted state after async operation
-      if (!isMountedRef.current) {
-        setProcessing(false);
+      if (!isMounted) {
+        setVerificationInProgress(false);
         return;
       }
 
@@ -435,137 +359,138 @@ export default function FacialRecord() {
         } as any);
       });
 
-      // Send request to backend API
-      const response = await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/verify-images",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
+      // Add timeout handling for API request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+      try {
+        // Send request to backend API
+        const response = await fetch(
+          "https://b018-63-143-118-227.ngrok-free.app/verify-images",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+            signal: controller.signal,
+          }
+        );
+
+        clearTimeout(timeoutId);
+
+        if (!isMounted) {
+          setVerificationInProgress(false);
+          return;
         }
-      );
 
-      // Check mounted state after fetch
-      if (!isMountedRef.current) {
-        setProcessing(false);
-        return;
-      }
+        // Handle API response
+        if (!response.ok) {
+          console.error("Verify API error:", response.status);
 
-      // Handle API response
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Verify API error:", response.status, errorText);
+          if (isMounted) {
+            updateVerificationStep("deepfake-check", "error");
+            updateVerificationStep("face-match", "error");
+            handleVerificationFailure();
+          }
+          return;
+        }
 
-        if (isMountedRef.current) {
+        const result = await response.json();
+
+        if (!isMounted) return;
+
+        // Update verification steps based on results
+        updateVerificationStep(
+          "deepfake-check",
+          result.deepfake_detected ? "error" : "success"
+        );
+        updateVerificationStep(
+          "face-match",
+          result.match ? "success" : "error"
+        );
+
+        if (result.success) {
+          // Navigate to the VerificationSuccess screen instead of showing an alert
+          navigateTo(Routes.CertificateGenerated);
+        } else {
+          handleVerificationFailure();
+        }
+      } catch (error) {
+        console.error("Verification network error:", error);
+
+        if (isMounted) {
           updateVerificationStep("deepfake-check", "error");
           updateVerificationStep("face-match", "error");
-          handleVerificationFailure("An error occurred during verification");
+          handleVerificationFailure();
         }
-        return;
-      }
-
-      const result = await response.json();
-
-      // Final mounted check before updating state
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      // Update verification steps based on results
-      updateVerificationStep(
-        "deepfake-check",
-        result.deepfake_detected ? "error" : "success"
-      );
-      updateVerificationStep("face-match", result.match ? "success" : "error");
-
-      if (result.success) {
-        Alert.alert(
-          "Verification Successful",
-          "Your identity has been verified successfully. Your funds are on the way.",
-          [{ text: "OK", onPress: () => safeNavigate("/(tabs)/dashboard") }]
-        );
-      } else {
-        let failureReason = "We couldn't verify your identity.";
-        if (result.deepfake_detected) {
-          failureReason =
-            "Our system detected potential manipulation in the captured images.";
-        } else if (!result.match) {
-          failureReason =
-            "The face in the images doesn't match your ID document.";
-        }
-
-        handleVerificationFailure(failureReason);
       }
     } catch (error) {
-      console.error("Processing error:", error);
+      console.error("Verification processing error:", error);
 
-      if (isMountedRef.current) {
-        // Update verification steps
+      if (isMounted) {
         updateVerificationStep("deepfake-check", "error");
         updateVerificationStep("face-match", "error");
-        handleVerificationFailure("An error occurred during verification");
+        handleVerificationFailure();
       }
     } finally {
-      if (isMountedRef.current) {
-        setProcessing(false);
+      if (isMounted) {
+        setVerificationInProgress(false);
       }
     }
   };
 
   // Handle verification failure
-  const handleVerificationFailure = (message: string) => {
-    if (!isMountedRef.current) return;
+  const handleVerificationFailure = () => {
+    if (!isMounted) return;
 
     const newFailedAttempts = failedAttempts + 1;
     setFailedAttempts(newFailedAttempts);
 
     if (newFailedAttempts >= 3) {
       Alert.alert(
-        "Verification Failed",
-        "Multiple verification attempts failed. Connecting you to a live agent.",
-        [{ text: "OK", onPress: () => safeNavigate("/LiveConference") }]
+        "Verification Assistance",
+        "We'll connect you with a live agent to help complete your verification.",
+        [
+          {
+            text: "Continue",
+            onPress: () => navigateTo(Routes.VideoConference),
+          },
+        ]
       );
     } else {
       Alert.alert(
-        "Verification Failed",
-        `${message}. Please try again in better lighting conditions. (Attempt ${newFailedAttempts}/3)`,
+        "Verification",
+        "Please try again, teher was a face mismatch.",
         [
           {
             text: "Try Again",
-            onPress: () => {
-              // Navigate back to step2 screen
-              safeNavigate("/step2");
-            },
+            onPress: () => navigateTo(Routes.Step2Verification),
           },
         ]
       );
     }
   };
 
-  // Reset verification process after failure
+  // Reset verification process
   const resetVerificationProcess = () => {
-    if (!isMountedRef.current) return;
+    if (!isMounted) return;
 
-    // Reset states
     setFaceDetected(false);
-    setIsCapturing(false);
-    setProcessing(false);
+    setCaptureInProgress(false);
+    setVerificationInProgress(false);
     setCaptureCount(0);
 
     // Reset verification steps
     updateVerificationStep("face-detection", "pending");
     updateVerificationStep("deepfake-check", "pending");
     updateVerificationStep("face-match", "pending");
+  };
 
-    // Restart face detection
-    if (!faceDetectionIntervalRef.current && isMountedRef.current) {
-      faceDetectionIntervalRef.current = setInterval(() => {
-        if (isMountedRef.current) {
-          checkFaceDetection();
-        }
-      }, 2000);
+  // Safe navigation function
+  const navigateTo = (route: string) => {
+    if (isMounted) {
+      router.replace(route);
     }
   };
 
@@ -603,7 +528,7 @@ export default function FacialRecord() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => safeNavigate("/")}
+          onPress={() => navigateTo("/")}
         >
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -617,6 +542,13 @@ export default function FacialRecord() {
         style={styles.camera}
         facing="front"
         onCameraReady={() => setIsCameraReady(true)}
+        onMountError={(error) => {
+          console.error("Camera mount error:", error);
+          Alert.alert(
+            "Camera Error",
+            "Unable to initialize camera. Please check your device permissions and try again."
+          );
+        }}
       />
 
       {/* Face Overlay */}
@@ -633,24 +565,17 @@ export default function FacialRecord() {
           ]}
         />
 
-        {faceDetected && !isCapturing && !processing && (
+        {faceDetected && !captureInProgress && !verificationInProgress && (
           <View style={styles.detectedBanner}>
             <Text style={styles.detectedText}>Face Detected</Text>
           </View>
         )}
 
-        {!faceDetected && !isCapturing && !processing && (
+        {!faceDetected && !captureInProgress && !verificationInProgress && (
           <View style={styles.instructionBanner}>
             <Text style={styles.instructionText}>
               Position your face in the frame
             </Text>
-          </View>
-        )}
-
-        {checkingFace && showFaceDetection && !faceDetected && (
-          <View style={styles.checkingBanner}>
-            <ActivityIndicator size="small" color="white" />
-            <Text style={styles.checkingText}>Detecting face...</Text>
           </View>
         )}
       </Animated.View>
@@ -663,8 +588,8 @@ export default function FacialRecord() {
         </View>
       )}
 
-      {/* Capturing UI - Moved to bottom half of screen */}
-      {isCapturing && (
+      {/* Capturing UI */}
+      {captureInProgress && (
         <View style={styles.capturingOverlay}>
           <View style={styles.capturingIndicator}>
             <ActivityIndicator size="small" color="white" />
@@ -677,67 +602,35 @@ export default function FacialRecord() {
 
       {/* Verification Steps */}
       <Animated.View style={[styles.verificationSteps, { opacity: fadeAnim }]}>
-        {verificationSteps.map(
-          (step: {
-            id: React.Key | null | undefined;
-            status: string;
-            title:
-              | string
-              | number
-              | bigint
-              | boolean
-              | React.ReactElement<
-                  unknown,
-                  string | React.JSXElementConstructor<any>
-                >
-              | Iterable<React.ReactNode>
-              | React.ReactPortal
-              | Promise<
-                  | string
-                  | number
-                  | bigint
-                  | boolean
-                  | React.ReactPortal
-                  | React.ReactElement<
-                      unknown,
-                      string | React.JSXElementConstructor<any>
-                    >
-                  | Iterable<React.ReactNode>
-                  | null
-                  | undefined
-                >
-              | null
-              | undefined;
-          }) => (
-            <View key={step.id} style={styles.verificationStep}>
-              <View
-                style={[
-                  styles.stepIndicator,
-                  step.status === "pending" && styles.stepPending,
-                  step.status === "success" && styles.stepSuccess,
-                  step.status === "error" && styles.stepError,
-                  step.status === "processing" && styles.stepProcessing,
-                ]}
-              >
-                {step.status === "success" && (
-                  <Ionicons name="checkmark" size={16} color="white" />
-                )}
-                {step.status === "error" && (
-                  <Ionicons name="close" size={16} color="white" />
-                )}
-                {step.status === "processing" && (
-                  <ActivityIndicator size="small" color="white" />
-                )}
-              </View>
-              <Text style={styles.stepText}>{step.title}</Text>
+        {verificationSteps.map((step) => (
+          <View key={step.id} style={styles.verificationStep}>
+            <View
+              style={[
+                styles.stepIndicator,
+                step.status === "pending" && styles.stepPending,
+                step.status === "success" && styles.stepSuccess,
+                step.status === "error" && styles.stepError,
+                step.status === "processing" && styles.stepProcessing,
+              ]}
+            >
+              {step.status === "success" && (
+                <Ionicons name="checkmark" size={16} color="white" />
+              )}
+              {step.status === "error" && (
+                <Ionicons name="close" size={16} color="white" />
+              )}
+              {step.status === "processing" && (
+                <ActivityIndicator size="small" color="white" />
+              )}
             </View>
-          )
-        )}
+            <Text style={styles.stepText}>{step.title}</Text>
+          </View>
+        ))}
       </Animated.View>
 
       {/* Bottom Controls */}
       <Animated.View style={[styles.controls, { opacity: fadeAnim }]}>
-        {!isCapturing && !processing && (
+        {!captureInProgress && !verificationInProgress && (
           <>
             {faceDetected ? (
               <TouchableOpacity
@@ -765,7 +658,7 @@ export default function FacialRecord() {
           </>
         )}
 
-        {processing && (
+        {verificationInProgress && (
           <View style={styles.processingContainer}>
             <ActivityIndicator size="large" color="white" />
             <Text style={styles.processingText}>
@@ -884,21 +777,6 @@ const styles = StyleSheet.create({
   instructionText: {
     color: "black",
     fontWeight: "bold",
-  },
-  checkingBanner: {
-    position: "absolute",
-    bottom: height * 0.3,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    gap: 8,
-  },
-  checkingText: {
-    color: "white",
-    fontWeight: "500",
   },
   capturingOverlay: {
     position: "absolute",

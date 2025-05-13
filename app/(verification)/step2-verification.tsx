@@ -1,9 +1,10 @@
 import { Images } from "@/assets/images";
 import { Routes } from "@/constants/routes";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  Animated,
   Dimensions,
   Image,
   SafeAreaView,
@@ -18,6 +19,69 @@ const { width, height } = Dimensions.get("window");
 
 const Step2VerificationScreen = () => {
   const router = useRouter();
+  const [showCountdown, setShowCountdown] = useState(false);
+  const [count, setCount] = useState(5);
+  const animatedValue = new Animated.Value(0);
+
+  // Reset state when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Reset the countdown state when the screen is focused
+      setShowCountdown(false);
+      setCount(5);
+      animatedValue.setValue(0);
+
+      return () => {
+        // Cleanup if needed
+      };
+    }, [])
+  );
+
+  // Handle the countdown animation
+  useEffect(() => {
+    let timer: number;
+
+    if (showCountdown) {
+      if (count > 0) {
+        // Animate the number scaling on each count change
+        Animated.sequence([
+          Animated.timing(animatedValue, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(animatedValue, {
+            toValue: 0.8,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]).start();
+
+        // Decrement the counter after 1 second
+        timer = setTimeout(() => {
+          setCount(count - 1);
+        }, 1000);
+      } else {
+        // When countdown finishes, navigate to facial record screen
+        router.push(Routes.FacialRecord);
+      }
+    }
+
+    // Clear the timer when the component unmounts or when dependencies change
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [showCountdown, count, router]);
+
+  // Animation styles for the countdown
+  const countdownScale = animatedValue.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.8, 1.2, 1],
+  });
+
+  const startVerification = () => {
+    setShowCountdown(true);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -82,7 +146,8 @@ const Step2VerificationScreen = () => {
 
         <TouchableOpacity
           style={styles.verificationButton}
-          onPress={() => router.push(Routes.FacialRecord)}
+          onPress={startVerification}
+          disabled={showCountdown}
         >
           <FontAwesome5
             name="user-shield"
@@ -90,19 +155,41 @@ const Step2VerificationScreen = () => {
             color="#fff"
             style={styles.verificationIcon}
           />
-          <Text style={styles.verificationText}>START FACIAL RECOGNITION</Text>
+          <Text style={styles.verificationText}>START PROCESS NOW</Text>
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <Ionicons
-          name="arrow-back"
-          size={18}
-          color="#1F245E"
-          style={styles.backIcon}
-        />
-        <Text style={styles.backButtonText}>Go back</Text>
-      </TouchableOpacity>
+      {!showCountdown && (
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons
+            name="arrow-back"
+            size={18}
+            color="#1F245E"
+            style={styles.backIcon}
+          />
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Countdown Overlay */}
+      {showCountdown && (
+        <View style={styles.countdownOverlay}>
+          <View style={styles.countdownContainer}>
+            <Text style={styles.getReadyText}>GET READY</Text>
+            <Animated.Text
+              style={[
+                styles.countdownText,
+                { transform: [{ scale: countdownScale }] },
+              ]}
+            >
+              {count}
+            </Animated.Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -230,5 +317,31 @@ const styles = StyleSheet.create({
     color: "#1F245E",
     fontWeight: "600",
     fontSize: 15,
+  },
+  countdownOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countdownContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  getReadyText: {
+    color: "#fff",
+    fontSize: 30,
+    fontWeight: "bold",
+    marginBottom: 20,
+    letterSpacing: 1,
+  },
+  countdownText: {
+    color: "#fff",
+    fontSize: 80,
+    fontWeight: "bold",
   },
 });
