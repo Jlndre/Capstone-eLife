@@ -4,6 +4,7 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Camera } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useState } from "react";
 import {
   Dimensions,
@@ -27,6 +28,7 @@ interface FileData {
 const UploadPhotoIDScreen = () => {
   const router = useRouter();
   const [file, setFile] = useState<FileData | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -74,6 +76,105 @@ const UploadPhotoIDScreen = () => {
     }
   };
 
+  const uploadPhotoID = async () => {
+    if (!file) return;
+
+    // Set uploading state to true to show loading screen
+    setIsUploading(true);
+
+    // Navigate to loading screen immediately
+    router.push(Routes.CheckingUpload);
+
+    const formData = new FormData();
+    formData.append("id_image", {
+      uri: file.uri,
+      name: file.name,
+      type: file.type,
+    } as any);
+
+    try {
+      const token = await SecureStore.getItemAsync("jwt");
+      const response = await fetch(
+        "https://b018-63-143-118-227.ngrok-free.app/verify-id-upload",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        }
+      );
+
+      const text = await response.text();
+      console.log("RAW RESPONSE:", text);
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (jsonErr) {
+        console.error("JSON parse failed:", jsonErr);
+        router.push({
+          pathname: Routes.UploadError,
+          params: { message: "Server returned invalid response" },
+        });
+        return;
+      }
+
+      // Reset file after upload attempt
+      setFile(null);
+
+      if (response.ok) {
+        // Check verification results from the backend
+        if (data.verification_result) {
+          const result = data.verification_result;
+
+          // Check for specific failures
+          if (!result.name_match) {
+            router.push({
+              pathname: Routes.UploadError,
+              params: { message: "Name does not match our records" },
+            });
+          } else if (!result.id_match) {
+            router.push({
+              pathname: Routes.UploadError,
+              params: { message: "Invalid ID number" },
+            });
+          } else if (!result.expiry_valid) {
+            router.push({
+              pathname: Routes.UploadError,
+              params: { message: "ID is expired" },
+            });
+          } else {
+            // All checks passed, go to success screen
+            router.push(Routes.UploadSuccess);
+          }
+        } else {
+          // Generic success if no specific verification result
+          router.push(Routes.Step2Verification);
+        }
+      } else {
+        // Handle API error response
+        router.push({
+          pathname: Routes.UploadError,
+          params: {
+            message: data.message || "Verification failed. Please try again.",
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      router.push({
+        pathname: Routes.CheckingUpload,
+        params: {
+          message:
+            "Connection error. Please check your internet and try again.",
+        },
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerSection}>
@@ -99,7 +200,11 @@ const UploadPhotoIDScreen = () => {
       />
 
       <View style={styles.uploadCard}>
-        <TouchableOpacity style={styles.uploadButton} onPress={pickFromCamera}>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={pickFromCamera}
+          disabled={isUploading}
+        >
           <Ionicons
             name="camera"
             size={20}
@@ -115,7 +220,11 @@ const UploadPhotoIDScreen = () => {
           <View style={styles.separator} />
         </View>
 
-        <TouchableOpacity style={styles.uploadButton} onPress={pickFromGallery}>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={pickFromGallery}
+          disabled={isUploading}
+        >
           <MaterialIcons
             name="photo-library"
             size={20}
@@ -140,16 +249,20 @@ const UploadPhotoIDScreen = () => {
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => router.push(Routes.StartProcess)}
+        disabled={isUploading}
       >
         <Text style={styles.backButtonText}>Go back</Text>
       </TouchableOpacity>
 
       {file && (
         <TouchableOpacity
-          style={styles.nextButton}
-          onPress={() => router.push(Routes.CheckingUpload)}
+          style={[styles.nextButton, isUploading && styles.disabledButton]}
+          onPress={uploadPhotoID}
+          disabled={isUploading}
         >
-          <Text style={styles.nextButtonText}>Next</Text>
+          <Text style={styles.nextButtonText}>
+            {isUploading ? "Processing..." : "Next"}
+          </Text>
         </TouchableOpacity>
       )}
     </SafeAreaView>
@@ -158,6 +271,7 @@ const UploadPhotoIDScreen = () => {
 
 export default UploadPhotoIDScreen;
 
+// Styles with additions for disabled state
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -288,5 +402,9 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 16,
+  },
+  disabledButton: {
+    backgroundColor: "#ddd",
+    elevation: 0,
   },
 });

@@ -50,3 +50,5 @@ yarn-error.log
 venv/
 __pycache__/
 *.pyc
+
+elife-backend/firebase/serviceAccountKey.json

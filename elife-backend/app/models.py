@@ -3,6 +3,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 from enum import Enum
+from sqlalchemy.dialects.postgresql import JSON
 
 class ProofStatus(Enum):
     PENDING = 'pending'
@@ -19,6 +20,8 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(512), nullable=False)
     role = db.Column(db.String(20), default='pensioner')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    terms_accepted = db.Column(db.Boolean, default=False)
+
 
     # Relationships
     user_details = db.relationship('UserDetails', backref='user', uselist=False, cascade='all, delete-orphan')
@@ -62,6 +65,7 @@ class ProofSubmission(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     id_image_url = db.Column(db.String(255))
     video_url = db.Column(db.String(255))
+    image_urls = db.Column(JSON)  # <-- New field to store list of Firebase URLs
     status = db.Column(db.String(20), default='pending')  # 'pending', 'approved', 'flagged'
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
     verified_at = db.Column(db.DateTime)
@@ -100,7 +104,7 @@ class Notification(db.Model):
     target_quarter = db.Column(db.String(20))  # e.g., 'Q2-2025'
     sent_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_read = db.Column(db.Boolean, default=False)
-    push_token = db.Column(db.String(255))  
+      
 
     
     def __repr__(self):

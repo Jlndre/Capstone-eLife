@@ -1,18 +1,34 @@
-from flask import Blueprint, request, jsonify, current_app
+import traceback
+from flask import Blueprint, json, request, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
-from app.models import User, UserDetails, LoginSession, ProofSubmission, QuarterVerification, Notification
+from app.models import User, UserDetails, LoginSession, ProofSubmission, QuarterVerification, Notification, IdentityDocument
 from app import db, login_manager
-from datetime import datetime
+from datetime import datetime, timezone
 from app import csrf
 from functools import wraps
 import jwt
 import datetime as dt
-import cv2                    
-import numpy as np            
+import cv2        
+from fuzzywuzzy import fuzz            
+import numpy as np     
+import easyocr
+import uuid
+from firebase_admin import storage
+import re
+from dateutil.parser import parse       
+from tensorflow.keras.models import load_model
+from sklearn.metrics.pairwise import cosine_similarity
+import shutil
+import tempfile
+import os
+import mediapipe as mp # type: ignore
+from keras_facenet import FaceNet
 
 
 auth = Blueprint('auth', __name__)
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+mp_face_mesh = mp.solutions.face_mesh
+embedder = FaceNet()
 
 # JWT Configuration
 JWT_SECRET_KEY = 'supersecretkey123'  # Replace with env variable in production
@@ -64,6 +80,55 @@ def token_required(f):
 
     return decorated
 
+def detect_id_type(text: str) -> str:
+    lower_text = text.lower()
+    if "passport" in lower_text:
+        return "passport"
+    elif "driver" in lower_text or "dl" in lower_text:
+        return "driver_license"
+    elif "national" in lower_text or "nids" in lower_text:
+        return "national_id"
+    return "unknown"
+
+def extract_expiry_date(raw_text: str):
+    """Improved expiry date extraction with structured patterns, OCR noise handling, and timezone-aware comparisons."""
+    # Clean up OCR junk while preserving dashes, slashes, and common delimiters
+    clean_text = re.sub(r'[^a-zA-Z0-9/\- ,]', '', raw_text)
+
+    date_patterns = [
+        r'(20\d{2})-(\d{2})-(\d{2})',                        # ISO format: 2027-07-29
+        r'(\d{2})/(\d{2})/(\d{4})',                          # 29/07/2027
+        r'(\d{2})-(\d{2})-(\d{4})',                          # 29-07-2027
+        r'(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{4})',  # 29 July 2027
+        r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}',     # July 29, 2027
+    ]
+
+    print(f"Trying to parse expiry from: {clean_text}")
+
+    for pattern in date_patterns:
+        match = re.search(pattern, clean_text)
+        if match:
+            try:
+                date_str = match.group(0)
+                print(f"Pattern matched: {pattern} -> {date_str}")
+                parsed_date = parse(date_str, fuzzy=False)
+                parsed_date = parsed_date.replace(tzinfo=timezone.utc)  # Make it timezone-aware
+                if 2000 <= parsed_date.year <= 2100 and parsed_date > datetime.now(timezone.utc):
+                    return parsed_date
+            except Exception as e:
+                print(f"Parse failed for: {match.group(0)} -> {e}")
+                continue
+
+    # Fallback to fuzzy parsing of the whole string
+    try:
+        parsed_date = parse(clean_text, fuzzy=True)
+        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+        if 2000 <= parsed_date.year <= 2100 and parsed_date > datetime.now(timezone.utc):
+            return parsed_date
+    except Exception as e:
+        print("Fallback parse failed:", e)
+
+    return None
 
 @csrf.exempt
 @auth.route("/login", methods=["POST"])
@@ -110,6 +175,7 @@ def login():
         return jsonify({
             'message': 'Login successful',
             'token': token,
+            "terms_accepted": user.terms_accepted,
             'user': {
                 'id': user.id,
                 'username': user.username,
@@ -432,7 +498,6 @@ def get_verification_history(current_user):
 
     return jsonify(recent_verified), 200
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
 @csrf.exempt
 @auth.route("/detect-face", methods=['POST'])
@@ -445,26 +510,348 @@ def detect_face(current_user):
         file = request.files['image']
         img_bytes = file.read()
 
+        # Decode image
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"error": "Could not decode image"}), 400
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Convert to RGB
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        ih, iw, _ = img.shape
 
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+        with mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5
+        ) as face_mesh:
 
-        face_data = []
-        for (x, y, w, h) in faces:
-            confidence = min((w * h) / (img.shape[0] * img.shape[1]), 1.0)
-            face_data.append({
-                "confidence": round(confidence, 2),
-                "bounding_box": {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+            results = face_mesh.process(img_rgb)
+
+            if not results.multi_face_landmarks:
+                return jsonify({"success": True, "face_count": 0, "faces": []})
+
+            face_landmarks_list = []
+
+            for face_landmarks in results.multi_face_landmarks:
+                landmarks = []
+                xs = []
+                ys = []
+
+                for lm in face_landmarks.landmark:
+                    x = int(lm.x * iw)
+                    y = int(lm.y * ih)
+                    xs.append(x)
+                    ys.append(y)
+                    landmarks.append({"x": x, "y": y})
+
+                bounding_box = {
+                    "x": min(xs),
+                    "y": min(ys),
+                    "width": max(xs) - min(xs),
+                    "height": max(ys) - min(ys)
+                }
+
+                face_landmarks_list.append({
+                    "landmark_count": len(landmarks),
+                    "landmarks": landmarks,
+                    "bounding_box": bounding_box
+                })
+
+            return jsonify({
+                "success": True,
+                "face_count": len(face_landmarks_list),
+                "faces": face_landmarks_list
             })
-
-        return jsonify({"success": True, "face_count": len(face_data), "faces": face_data})
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"error": "Face detection failed", "details": str(e)}), 500
+        return jsonify({
+            "error": "Face mesh detection failed",
+            "details": str(e)
+        }), 500
+
+    
+@csrf.exempt
+@auth.route("/verify-id-upload", methods=["POST"])
+@token_required
+def verify_id_upload(current_user):
+    try:
+        print("Received ID upload request from:", current_user.username)
+
+        if 'id_image' not in request.files:
+            return jsonify({'message': 'No file uploaded'}), 400
+
+        file = request.files['id_image']
+        content_type = file.content_type
+        filename = f"{uuid.uuid4()}_{file.filename}"
+
+        bucket = storage.bucket()
+        blob = bucket.blob(f"id_uploads/{filename}")
+        blob.upload_from_file(file, content_type=content_type)
+        blob.make_public()
+        image_url = blob.public_url
+        print("Uploaded to Firebase:", image_url)
+
+        file.stream.seek(0)
+        npimg = np.frombuffer(file.read(), np.uint8)
+        image = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+
+        try:
+            reader = easyocr.Reader(['en'], gpu=False)
+            result = reader.readtext(image)
+        except Exception as e:
+            return jsonify({'message': f'OCR processing failed: {str(e)}'}), 500
+
+        extracted_text = " ".join([r[1] for r in result])
+        print("OCR Extracted:", extracted_text)
+
+        user_details = current_user.user_details
+        if not user_details:
+            return jsonify({
+                "error": "User profile details are missing.",
+                "message": "Please complete your profile before uploading ID."
+            }), 400
+
+        # Tokenize and normalize OCR text
+        tokens = re.findall(r'[a-zA-Z]+', extracted_text.lower())
+        normalized_text = " ".join(tokens)
+        flat_text = normalized_text.replace(" ", "")
+        print("OCR Tokens:", tokens)
+        print("Normalized OCR Text:", normalized_text)
+
+        # Normalize expected name components
+        first = re.sub(r'[^a-zA-Z0-9]', '', user_details.firstname).lower()
+        last = re.sub(r'[^a-zA-Z0-9]', '', user_details.lastname).lower()
+
+        expected_names = [
+            f"{first}{last}",
+            f"{last}{first}",
+            f"{first} {last}",
+            f"{last} {first}"
+        ]
+
+        # Fuzzy name match
+        name_match = any(
+            fuzz.token_set_ratio(expected, normalized_text) > 80
+            for expected in expected_names
+        )
+
+        # Fallback: plain substring match
+        if not name_match:
+            name_match = first in flat_text and last in flat_text
+
+        id_type = request.form.get("id_type") or detect_id_type(extracted_text)
+        print("Detected ID type:", id_type)
+
+        expected_id_number = None
+        if id_type == 'driver_license':
+            expected_id_number = user_details.trn
+        elif id_type == 'national_id':
+            expected_id_number = user_details.nids_num
+        elif id_type == 'passport':
+            expected_id_number = user_details.passport_num
+
+        id_match = expected_id_number and expected_id_number in extracted_text
+
+        expiry_date = extract_expiry_date(extracted_text)  # Pass full raw text here
+
+        print("Full Extracted Text:", extracted_text)
+        print("Extracted expiry date:", expiry_date)
+        print("Current UTC time:", datetime.now(timezone.utc))
+
+        expiry_valid = expiry_date is not None
+
+        submission = ProofSubmission(
+            user_id=current_user.id,
+            id_image_url=image_url,
+            status='pending',
+            submitted_at=datetime.now(timezone.utc)
+        )
+        db.session.add(submission)
+        db.session.commit()
+
+        doc = IdentityDocument(
+            user_id=current_user.id,
+            proof_submission_id=submission.id,
+            type=id_type,
+            image_url=image_url,
+            expiry_date=expiry_date
+        )
+        db.session.add(doc)
+        db.session.commit()
+
+        print("Name Match:", name_match)
+        print("ID Match:", id_match)
+        print("Expiry Valid:", expiry_valid)
+
+        if name_match and id_match and expiry_valid:
+            return jsonify({
+                'message': 'ID verified successfully',
+                'next_step': 'facial_verification',
+                'submission_id': submission.id,
+                'id_type_detected': id_type
+            }), 200
+        else:
+            return jsonify({
+                'message': 'ID verification failed. Please try again or contact support.',
+                'next_step': 'retry_or_escalate',
+                'ocr_result': extracted_text,
+                'name_match': name_match,
+                'id_match': id_match,
+                'expiry_valid': expiry_valid,
+                'id_type_detected': id_type
+            }), 400
+
+    except Exception as e:
+        print("INTERNAL SERVER ERROR:", str(e))
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
+
+@csrf.exempt
+@auth.route("/verify-images", methods=["POST"])
+@token_required
+def verify_images(current_user):
+    try:
+        print(f"[Verify] Received image sequence upload from {current_user.username}")
+
+        images = request.files.getlist('images')
+        if not images or len(images) < 1:
+            return jsonify({'message': 'At least one image is required'}), 400
+
+        print(f"Received {len(images)} images for verification")
+        temp_dir = tempfile.mkdtemp()
+        image_urls, local_image_paths = [], []
+        bucket = storage.bucket()
+
+        for idx, image in enumerate(images):
+            filename = f"{uuid.uuid4()}_{idx}.jpg"
+            blob = bucket.blob(f"verification_images/{filename}")
+            blob.upload_from_file(image, content_type=image.content_type or 'image/jpeg')
+            blob.make_public()
+            image_url = blob.public_url
+            image_urls.append(image_url)
+
+            image.stream.seek(0)
+            local_path = os.path.join(temp_dir, filename)
+            image.save(local_path)
+            local_image_paths.append(local_path)
+
+        clearest_image_path = select_clearest_image(local_image_paths)
+        if not clearest_image_path:
+            shutil.rmtree(temp_dir)
+            return jsonify({'message': 'Failed to find a clear image for verification'}), 422
+
+        # -------- Deepfake Detection --------
+        frame = cv2.imread(clearest_image_path)
+        frame = cv2.resize(frame, (128, 128)) / 255.0
+        if frame.ndim == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        elif frame.shape[-1] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+        frame_input = np.expand_dims(frame, axis=0).astype("float32")
+
+        deepfake_model = load_model(os.path.join(BASE_DIR, 'models', 'elife_deepfake_detector_test.keras'))
+        deepfake_score = deepfake_model.predict(frame_input)[0][0]
+        is_deepfake = deepfake_score > 0.5
+        print("Deepfake score:", deepfake_score)
+
+        # -------- FaceNet Identity Match --------
+        id_doc = IdentityDocument.query.filter_by(user_id=current_user.id).order_by(IdentityDocument.id.desc()).first()
+        if not id_doc:
+            shutil.rmtree(temp_dir)
+            return jsonify({'message': 'No ID document found'}), 404
+
+        id_image_blob = bucket.blob(id_doc.image_url.replace(f"https://storage.googleapis.com/{bucket.name}/", ""))
+        id_image_path = os.path.join(temp_dir, "id_image.jpg")
+        id_image_blob.download_to_filename(id_image_path)
+
+        # Resize both images to FaceNet expected input shape: (160, 160)
+        id_img = cv2.imread(id_image_path)
+        face_img = cv2.imread(clearest_image_path)
+
+        id_img = cv2.resize(id_img, (160, 160))
+        face_img = cv2.resize(face_img, (160, 160))
+
+        # Convert to RGB and expand dims
+        id_input = np.expand_dims(cv2.cvtColor(id_img, cv2.COLOR_BGR2RGB), axis=0)
+        face_input = np.expand_dims(cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB), axis=0)
+
+        id_embedding = embedder.embeddings(id_input)
+        frame_embedding = embedder.embeddings(face_input)
+
+
+
+        similarity = cosine_similarity(frame_embedding, id_embedding)[0][0]
+        is_match = similarity > 0.7
+        print(f"Face match: {is_match} (similarity = {similarity:.2f})")
+
+        # Record result
+        proof = ProofSubmission(
+            user_id=current_user.id,
+            id_image_url=id_doc.image_url,
+            video_url=None,
+            image_urls=json.dumps(image_urls),
+            status='approved' if is_match and not is_deepfake else 'flagged',
+            submitted_at=datetime.now(timezone.utc),
+            verified_at=datetime.now(timezone.utc),
+            notes=f"Similarity: {similarity:.2f}, Deepfake Score: {deepfake_score:.2f}"
+        )
+        db.session.add(proof)
+        db.session.commit()
+        shutil.rmtree(temp_dir)
+
+        return jsonify({
+    "success": bool(is_match and not is_deepfake),
+    "match": bool(is_match),
+    "deepfake_detected": bool(is_deepfake),
+    "similarity": float(similarity),
+    "deepfake_score": float(deepfake_score),
+    "image_urls": image_urls
+}), 200
+
+
+
+    except Exception as e:
+        print("VERIFY-IMAGES ERROR:", str(e))
+        traceback.print_exc()
+        return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
+
+def select_clearest_image(image_paths):
+    """
+    Select the clearest image from a list of image paths using Laplacian variance.
+    Higher variance indicates a clearer, more focused image.
+    """
+    if not image_paths:
+        return None
+        
+    clearest_path = None
+    highest_variance = -1
+    
+    for path in image_paths:
+        try:
+            img = cv2.imread(path)
+            if img is None:
+                continue
+                
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            variance = cv2.Laplacian(gray, cv2.CV_64F).var()
+            
+            if variance > highest_variance:
+                highest_variance = variance
+                clearest_path = path
+        except Exception as e:
+            print(f"Error processing image {path}: {e}")
+            continue
+    
+    return clearest_path
+
+@auth.route("/accept-terms", methods=["POST"])
+@token_required
+def accept_terms(current_user):
+    current_user.terms_accepted = True
+    db.session.commit()
+    return jsonify({"message": "Terms accepted"}), 200

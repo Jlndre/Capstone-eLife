@@ -6,6 +6,12 @@ from flask_wtf.csrf import CSRFProtect
 from flask_cors import CORS
 from app.config import Config
 
+
+
+import firebase_admin
+from firebase_admin import credentials, storage
+import os
+
 db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
@@ -21,11 +27,20 @@ def create_app():
     migrate.init_app(app, db)
     login_manager.init_app(app)
     csrf.init_app(app)
-
     login_manager.login_view = 'auth.login'
 
-    # Register blueprints
-    from app.views import auth
-    app.register_blueprint(auth)
+    firebase_key_path = os.path.join(os.getcwd(), "firebase", "serviceAccountKey.json")
+    if os.path.exists(firebase_key_path):
+        cred = credentials.Certificate(firebase_key_path)
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': 'elife-9730a'
+        })
+    else:
+        raise FileNotFoundError("Firebase service account key not found. Expected at: firebase/serviceAccountKey.json")
+
+    from app import views  # 👈 This runs the entire views.py file
+    app.register_blueprint(views.auth)
+
+
 
     return app
