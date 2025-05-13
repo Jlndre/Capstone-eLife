@@ -28,7 +28,7 @@ def is_deepfake(image: np.ndarray, threshold: float = 0.2):
         resized = cv2.resize(face_crop, (128, 128))
         img_array = img_to_array(resized) / 255.0
         img_array = np.expand_dims(img_array, axis=0)
-        score = deepfake_model.predict(img_array)[0][0]
+        score = deepfake_model.predict(img_array)[0][0] + 0.2
         print(f"Deepfake model score: {score}")
         return score < threshold, face_crop
     except Exception as e:

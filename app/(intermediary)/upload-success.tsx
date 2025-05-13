@@ -1,14 +1,12 @@
-import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   Animated,
   Dimensions,
   Easing,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -18,7 +16,6 @@ const UploadSuccessScreen = () => {
   const router = useRouter();
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
-  const [showButton, setShowButton] = useState(false);
 
   useEffect(() => {
     Animated.parallel([
@@ -34,10 +31,7 @@ const UploadSuccessScreen = () => {
         useNativeDriver: true,
         easing: Easing.out(Easing.exp),
       }),
-    ]).start(() => {
-      // Show button after animation completes
-      setTimeout(() => setShowButton(true), 500);
-    });
+    ]).start();
   }, []);
 
   return (
@@ -53,15 +47,6 @@ const UploadSuccessScreen = () => {
         </View>
       </Animated.View>
       <Text style={styles.text}>Photo ID Uploaded Successfully!</Text>
-
-      {showButton && (
-        <TouchableOpacity
-          style={styles.nextButton}
-          onPress={() => router.replace(Routes.Step2Verification)}
-        >
-          <Text style={styles.nextButtonText}>Next</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 };
@@ -94,20 +79,5 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#1F245E",
     textAlign: "center",
-  },
-  nextButton: {
-    position: "absolute",
-    bottom: 40,
-    right: 20,
-    backgroundColor: "#fff",
-    paddingVertical: 12,
-    paddingHorizontal: 26,
-    borderRadius: 10,
-    elevation: 3,
-  },
-  nextButtonText: {
-    color: "#1F245E",
-    fontWeight: "600",
-    fontSize: 16,
   },
 });

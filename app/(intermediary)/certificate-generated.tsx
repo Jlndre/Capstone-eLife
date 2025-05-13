@@ -1,15 +1,19 @@
-import React, { useEffect, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  Animated,
-  Easing,
-  TouchableOpacity,
-} from "react-native";
+import { Routes } from "@/constants/routes"; // Import routes
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useVerificationSuccess } from "../../hooks/useVerificationSuccess"; // Import the hook
 
 const { width, height } = Dimensions.get("window");
 
@@ -18,6 +22,11 @@ const CertificateGeneratedScreen = () => {
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const [showButton, setShowButton] = useState(false);
+  const [localProcessing, setLocalProcessing] = useState(false);
+
+  // Use the verification success hook
+  const { handleLifeCertificateViewed, isProcessing, error } =
+    useVerificationSuccess();
 
   useEffect(() => {
     Animated.parallel([
@@ -39,6 +48,35 @@ const CertificateGeneratedScreen = () => {
     });
   }, []);
 
+  // Handle viewing the certificate and all the associated state changes
+  const handleViewCertificate = async () => {
+    try {
+      setLocalProcessing(true); // Add local processing state
+
+      // Call the hook to handle all state changes
+      console.log("Calling handleLifeCertificateViewed");
+      await handleLifeCertificateViewed();
+      console.log("handleLifeCertificateViewed completed successfully");
+
+      // If successful, navigate to the certificate view
+      console.log(`Navigating to: ${Routes.PensionHistory}`);
+      router.push(Routes.PensionHistory);
+    } catch (err) {
+      console.error("Error in handleViewCertificate:", err);
+      // Show error if something goes wrong
+      Alert.alert(
+        "Error",
+        "There was a problem preparing your Life Certificate. Please try again.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setLocalProcessing(false); // Ensure local processing state is reset
+    }
+  };
+
+  // Use combined processing state from both local and hook
+  const isButtonDisabled = isProcessing || localProcessing;
+
   return (
     <View style={styles.container}>
       <Animated.View
@@ -52,17 +90,26 @@ const CertificateGeneratedScreen = () => {
         </View>
       </Animated.View>
       <Text style={styles.text}>
-        Your Life Certification has been generated successfully.
+        Your Life has been verified! Certificate has been generated
+        successfully.
       </Text>
 
       {showButton && (
         <TouchableOpacity
-          style={styles.viewButton}
-          onPress={() => router.push("/")}
+          style={[styles.viewButton, isButtonDisabled && styles.disabledButton]}
+          onPress={handleViewCertificate}
+          disabled={isButtonDisabled}
         >
-          <Text style={styles.viewButtonText}>
-            Click here to view Life Certificate
-          </Text>
+          {isButtonDisabled ? (
+            <View style={styles.buttonContent}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <Text style={styles.viewButtonText}>Processing...</Text>
+            </View>
+          ) : (
+            <Text style={styles.viewButtonText}>
+              Click here to view Life Certificate
+            </Text>
+          )}
         </TouchableOpacity>
       )}
     </View>
@@ -107,10 +154,20 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     elevation: 3,
   },
+  disabledButton: {
+    backgroundColor: "#555",
+    opacity: 0.8,
+  },
   viewButtonText: {
     color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 16,
     textAlign: "center",
+  },
+  buttonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
 });

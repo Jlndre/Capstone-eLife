@@ -80,10 +80,10 @@ const UploadPhotoIDScreen = () => {
   const uploadPhotoID = async () => {
     if (!file) return;
 
-    // Set uploading state to true to show loading screen
+    // Set uploading state to true
     setIsUploading(true);
 
-    // Navigate to loading screen immediately
+    // Navigate to loading screen
     router.push(Routes.CheckingUpload);
 
     const formData = new FormData();

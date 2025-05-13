@@ -39,8 +39,4 @@ def create_app():
     from app import views  # 👈 This runs the entire views.py file
     app.register_blueprint(views.auth)
 
-    # Register the certificate blueprint
-    from app.certificate import certificate_bp
-    app.register_blueprint(certificate_bp, url_prefix='/api')
-
     return app

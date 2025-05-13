@@ -42,8 +42,8 @@ export default function ProfileScreen() {
       setLoading(true);
       try {
         const token = await SecureStore.getItemAsync("jwt");
-        await fetch(
-          "https://b018-63-143-118-227.ngrok-free.app/profile/accept-terms",
+        const res = await fetch(
+          "https://b018-63-143-118-227.ngrok-free.app/profile",
           {
             headers: {
               Authorization: `Bearer ${token}`,
