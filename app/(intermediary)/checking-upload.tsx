@@ -43,16 +43,15 @@ const ApprovalPendingScreen = () => {
     animate(dot2, 200);
     animate(dot3, 400);
 
-    // ⏳ Simulate backend processing
     const timer = setTimeout(() => {
-      const uploadSuccess = Math.random() < 0.85; // 85% success rate for realism
+      const uploadSuccess = Math.random() < 0.85;
 
       if (uploadSuccess) {
         router.replace(Routes.UploadSuccess);
       } else {
         router.replace(Routes.UploadError);
       }
-    }, 3500); // Adjust timing as needed
+    }, 3500);
 
     return () => clearTimeout(timer);
   }, []);

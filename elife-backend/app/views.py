@@ -7,6 +7,7 @@ from app import db, login_manager
 from datetime import datetime, timezone
 from app import csrf
 from functools import wraps
+from app.config import app_config
 import jwt
 import datetime as dt
 import cv2        
@@ -22,8 +23,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 import shutil
 import tempfile
 import os
-import mediapipe as mp # type: ignore
+import mediapipe as mp 
 from keras_facenet import FaceNet
+
+# Import utility functions from utils modules
+from app.utils import token_required, generate_token
+from app.utils import calculate_quarter_due_date
+from app.utils import select_clearest_image, get_largest_face, preprocess_image
+from app.utils import detect_id_type, extract_expiry_date, l2_normalize
+
 
 
 auth = Blueprint('auth', __name__)
@@ -31,101 +39,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 mp_face_mesh = mp.solutions.face_mesh
 embedder = FaceNet()
 
-# JWT Configuration
-JWT_SECRET_KEY = 'supersecretkey123'  # Replace with env variable in production
-JWT_EXPIRATION_HOURS = 24
+JWT_SECRET_KEY = app_config.JWT_SECRET_KEY
+JWT_EXPIRATION_HOURS = app_config.JWT_EXPIRATION_HOURS
 
-def generate_token(user_id):
-    """Generate JWT token for authentication"""
-    payload = {
-        'user_id': user_id,
-        'exp': datetime.utcnow() + dt.timedelta(hours=JWT_EXPIRATION_HOURS)
-    }
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm='HS256')
-
-def token_required(f):
-    """Decorator to protect API routes with JWT token"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-
-        # 🔎 Step 1: Extract token from Authorization header
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-
-        if not token:
-            print("[Auth] Missing token")
-            return jsonify({'message': 'Token is missing'}), 401
-
-        try:
-            # 🔎 Step 2: Decode JWT
-            data = jwt.decode(token, JWT_SECRET_KEY, algorithms=['HS256'])
-            current_user = User.query.get(data['user_id'])
-
-            if current_user is None:
-                print(f"[Auth] Token valid but user not found: user_id={data['user_id']}")
-                return jsonify({'message': 'User not found'}), 401
-
-        except jwt.ExpiredSignatureError:
-            print("[Auth] Token expired")
-            return jsonify({'message': 'Token expired'}), 401
-        except jwt.InvalidTokenError as e:
-            print(f"[Auth] Invalid token: {e}")
-            return jsonify({'message': 'Invalid token'}), 401
-        except Exception as e:
-            print(f"[Auth] Unexpected error during token validation: {e}")
-            return jsonify({'message': 'Token is invalid or expired'}), 401
-
-        return f(current_user, *args, **kwargs)
-
-    return decorated
-
-def detect_id_type(text: str) -> str:
-    lower_text = text.lower()
-    if "passport" in lower_text:
-        return "passport"
-    elif "driver" in lower_text or "dl" in lower_text:
-        return "driver_license"
-    elif "national" in lower_text or "nids" in lower_text:
-        return "national_id"
-    return "unknown"
-
-def extract_expiry_date(raw_text: str):
-    clean_text = re.sub(r'[^\w\s:/\-]', '', raw_text)
-    tokens = clean_text.split()
-    now = datetime.now(timezone.utc)
-    candidate_dates = []
-    expiry_keywords = ["expiry", "expires", "expiration", "exp", "valid", "validity"]
-
-    for i, token in enumerate(tokens):
-        if token.lower() in expiry_keywords and i + 1 < len(tokens):
-            try:
-                parsed = parse(tokens[i + 1], fuzzy=False).replace(tzinfo=timezone.utc)
-                if parsed > now:
-                    return parsed
-            except:
-                continue
-
-    date_patterns = [
-        r'(20\d{2})[-/](\d{2})[-/](\d{2})',
-        r'(\d{2})[-/](\d{2})[-/](\d{4})',
-        r'(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{4})',
-        r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}',
-    ]
-
-    for pattern in date_patterns:
-        matches = re.findall(pattern, clean_text)
-        for match in matches:
-            try:
-                date_str = " ".join(match) if isinstance(match, tuple) else match
-                parsed = parse(date_str, fuzzy=True).replace(tzinfo=timezone.utc)
-                if parsed > now:
-                    candidate_dates.append(parsed)
-            except:
-                continue
-
-    return max(candidate_dates) if candidate_dates else None
 
 @csrf.exempt
 @auth.route("/login", methods=["POST"])
@@ -136,28 +52,24 @@ def login():
     if not data:
         return jsonify({'message': 'No input data provided'}), 400
 
-    # 🔧 Normalize pensioner_number input
     pensioner_number = data.get('pensioner_number', '').replace("-", "").strip()
     password = data.get('password')
 
     if not pensioner_number or not password:
         return jsonify({'message': 'Missing pensioner_number or password'}), 400
 
-    print("🔍 Normalized login attempt:", pensioner_number)
+    print("Normalized login attempt:", pensioner_number)
 
-    # Fetch all users and log comparisons
     all_users = User.query.all()
     for u in all_users:
         print(f"👤 Comparing with DB entry: {u.pensioner_number} → normalized: {u.pensioner_number.replace('-', '').strip()}")
 
-    # Find user by normalized pensioner_number
     user = next(
         (u for u in all_users if u.pensioner_number.replace("-", "").strip() == pensioner_number),
         None
     )
 
     if user and user.check_password(password):
-        # Record login session
         session = LoginSession(
             user_id=user.id,
             ip_address=request.remote_addr,
@@ -166,7 +78,6 @@ def login():
         db.session.add(session)
         db.session.commit()
 
-        # Generate token
         token = generate_token(user.id)
 
         return jsonify({
@@ -185,61 +96,10 @@ def login():
         return jsonify({'message': 'Invalid pensioner_number or password'}), 401
 
 
-@auth.route("/register", methods=["POST"])
-def register():
-    """API endpoint for user registration"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'message': 'No input data provided'}), 400
-        
-    # Extract data
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
-    confirm_password = data.get('confirm_password')
-    pensioner_number = data.get('pensioner_number')
-    
-    # Validation
-    if not username or not email or not password or not confirm_password:
-        return jsonify({'message': 'Missing required fields'}), 400
-        
-    if password != confirm_password:
-        return jsonify({'message': 'Passwords do not match'}), 400
-        
-    # Check if username or email already exists
-    existing_user = User.query.filter(
-        (User.username == username) | (User.email == email)
-    ).first()
-    
-    if existing_user:
-        return jsonify({'message': 'Username or email already registered'}), 409
-        
-    # Create new user
-    new_user = User(
-        username=username,
-        email=email,
-        pensioner_number=pensioner_number
-    )
-    new_user.set_password(password)
-    
-    # Create empty user details
-    new_user_details = UserDetails(user=new_user)
-    
-    db.session.add(new_user)
-    db.session.add(new_user_details)
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Registration successful',
-        'user_id': new_user.id
-    }), 201
-
 @auth.route("/logout", methods=["POST"])
 @token_required
 def logout(current_user):
     """API endpoint for user logout"""
-    # Update the login session to record logout time
     session = LoginSession.query.filter_by(
         user_id=current_user.id, 
         logout_time=None
@@ -250,6 +110,7 @@ def logout(current_user):
         db.session.commit()
     
     return jsonify({'message': 'Logout successful'}), 200
+
 
 @auth.route("/profile", methods=["GET"])
 @token_required
@@ -287,7 +148,6 @@ def update_profile(current_user):
         
     user_details = current_user.user_details
     
-    # Update user details
     if 'details' in data:
         details = data['details']
         user_details.firstname = details.get('firstname', user_details.firstname)
@@ -305,7 +165,6 @@ def update_profile(current_user):
         user_details.contact_num = details.get('contact_num', user_details.contact_num)
         user_details.address = details.get('address', user_details.address)
     
-    # Update email if provided
     if 'email' in data and data['email'] != current_user.email:
         new_email = data['email']
         existing_email = User.query.filter_by(email=new_email).first()
@@ -315,6 +174,7 @@ def update_profile(current_user):
     
     db.session.commit()
     return jsonify({'message': 'Profile updated successfully'}), 200
+
 
 @auth.route('/api/dashboard-summary', methods=['GET'])
 @token_required
@@ -346,7 +206,6 @@ def dashboard_summary(current_user):
         elif q.status == 'missed':
             missed.append(entry)
         elif q.due_date >= today and not current:
-            # Assign first matching future quarter as current
             current = entry
         elif q.due_date > today:
             upcoming.append(entry)
@@ -365,34 +224,6 @@ def dashboard_summary(current_user):
         "upcoming": upcoming,
         "missed": missed
     })
-
-
-@auth.route("/change-password", methods=["POST"])
-@token_required
-def change_password(current_user):
-    """API endpoint to change user password"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'message': 'No input data provided'}), 400
-        
-    current_password = data.get('current_password')
-    new_password = data.get('new_password')
-    confirm_password = data.get('confirm_password')
-    
-    if not current_password or not new_password or not confirm_password:
-        return jsonify({'message': 'Missing required fields'}), 400
-        
-    if not current_user.check_password(current_password):
-        return jsonify({'message': 'Current password is incorrect'}), 401
-        
-    if new_password != confirm_password:
-        return jsonify({'message': 'New passwords do not match'}), 400
-        
-    current_user.set_password(new_password)
-    db.session.commit()
-    
-    return jsonify({'message': 'Password changed successfully'}), 200
 
 @auth.route("/validate-token", methods=["GET"])
 @token_required
@@ -420,38 +251,6 @@ def get_notifications(current_user):
         for n in notifications
     ]), 200
 
-@csrf.exempt
-@auth.route("/notifications/test", methods=["POST"])
-@token_required
-def create_test_notification(current_user):
-    data = request.get_json()
-    message = data.get("message", "This is a test notification")
-    notif_type = data.get("type", "reminder")
-    target_quarter = data.get("target_quarter", None)
-
-    notification = Notification(
-        user_id=current_user.id,
-        type=notif_type,
-        message=message,
-        target_quarter=target_quarter,
-        sent_at=datetime.utcnow(),
-        is_read=False
-    )
-
-    db.session.add(notification)
-    db.session.commit()
-
-    return jsonify({
-        "message": "Test notification created",
-        "notification": {
-            "id": notification.id,
-            "type": notification.type,
-            "message": notification.message,
-            "target_quarter": notification.target_quarter,
-            "sent_at": notification.sent_at.strftime('%Y-%m-%d %H:%M:%S'),
-            "is_read": notification.is_read
-        }
-    }), 201
 
 @csrf.exempt
 @auth.route("/notifications/<int:notification_id>/read", methods=["POST"])
@@ -507,13 +306,11 @@ def detect_face(current_user):
         file = request.files['image']
         img_bytes = file.read()
 
-        # Decode image
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"error": "Could not decode image"}), 400
 
-        # Convert to RGB
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         ih, iw, _ = img.shape
 
@@ -570,10 +367,19 @@ def detect_face(current_user):
             "details": str(e)
         }), 500
 
+
+
 @csrf.exempt
 @auth.route("/verify-id-upload", methods=["POST"])
 @token_required
 def verify_id_upload(current_user):
+
+    """
+    Endpoint for uploading and verifying ID image.
+    Verifies if the image is synthetic (deepfake), extracts text via OCR, checks for name and ID number match,
+    stores image in Firebase, and logs submission.
+    """
+    
     try:
         print("Received ID upload request from:", current_user.username)
 
@@ -588,7 +394,6 @@ def verify_id_upload(current_user):
         npimg = np.frombuffer(file.read(), np.uint8)
         image = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
 
-        # Deepfake detection on cropped face
         from app.services.deepfake_detector import is_deepfake
         is_fake, face_crop = is_deepfake(image)
         print("IS your ID Fake:", is_fake)
@@ -601,7 +406,6 @@ def verify_id_upload(current_user):
                 'deepfake_detected': True
             }), 400
 
-        # Upload cropped face to Firebase
         bucket = storage.bucket()
         face_filename = f"{uuid.uuid4()}_face_crop.jpg"
         _, buffer = cv2.imencode('.jpg', face_crop)
@@ -611,10 +415,9 @@ def verify_id_upload(current_user):
         face_image_url = face_blob.public_url
         print("Uploaded cropped face to Firebase:", face_image_url)
 
-        # OCR
         try:
             reader = easyocr.Reader(['en'], gpu=False)
-            resized = cv2.resize(image, (600, 400))  # Speed up OCR
+            resized = cv2.resize(image, (600, 400))  
             result = reader.readtext(resized)
 
             print("Proceeding to OCR and text validation...")
@@ -631,7 +434,6 @@ def verify_id_upload(current_user):
                 "message": "Please complete your profile before uploading ID."
             }), 400
 
-        # Normalize OCR text
         tokens = re.findall(r'[a-zA-Z]+', extracted_text.lower())
         normalized_text = " ".join(tokens)
         flat_text = normalized_text.replace(" ", "")
@@ -675,7 +477,6 @@ def verify_id_upload(current_user):
 
         expiry_valid = expiry_date is not None
 
-        # Save submission with face image URL
         submission = ProofSubmission(
             user_id=current_user.id,
             id_image_url=face_image_url,
@@ -720,6 +521,7 @@ def verify_id_upload(current_user):
     except Exception as e:
         print("INTERNAL SERVER ERROR:", str(e))
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
+
 
 @csrf.exempt
 @auth.route("/verify-images", methods=["POST"])
@@ -873,82 +675,6 @@ def verify_images(current_user):
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 
-def get_largest_face(faces, img):
-    """
-    Get the largest face in an image.
-    """
-    if len(faces) == 0:
-        # If no face detected, use the whole image
-        return img
-    
-    largest_area = 0
-    largest_face = None
-    
-    for (x, y, w, h) in faces:
-        if w * h > largest_area:
-            largest_area = w * h
-            largest_face = (x, y, w, h)
-    
-    x, y, w, h = largest_face
-    # Add some margin around the face
-    margin = int(min(w, h) * 0.2)
-    x_start = max(0, x - margin)
-    y_start = max(0, y - margin)
-    x_end = min(img.shape[1], x + w + margin)
-    y_end = min(img.shape[0], y + h + margin)
-    
-    return img[y_start:y_end, x_start:x_end]
-
-
-def preprocess_image(img):
-    """
-    Preprocess image for the face embedder.
-    """
-    # Convert to RGB
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    # Normalize pixel values to [-1, 1]
-    img = (img.astype(np.float32) - 127.5) / 127.5
-    # Expand dimensions to create batch of size 1
-    return np.expand_dims(img, axis=0)
-
-
-def l2_normalize(x):
-    """
-    Apply L2 normalization to embeddings.
-    """
-    return x / np.sqrt(np.sum(np.square(x), axis=1, keepdims=True))
-
-
-def select_clearest_image(image_paths):
-    """
-    Select the clearest image from a list of image paths using Laplacian variance.
-    Higher variance indicates a clearer, more focused image.
-    """
-    if not image_paths:
-        return None
-        
-    clearest_path = None
-    highest_variance = -1
-    
-    for path in image_paths:
-        try:
-            img = cv2.imread(path)
-            if img is None:
-                continue
-                
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            variance = cv2.Laplacian(gray, cv2.CV_64F).var()
-            
-            if variance > highest_variance:
-                highest_variance = variance
-                clearest_path = path
-        except Exception as e:
-            print(f"Error processing image {path}: {e}")
-            continue
-    
-    return clearest_path
-
-
 @auth.route("/accept-terms", methods=["POST"])
 @token_required
 def accept_terms(current_user):
@@ -1017,7 +743,6 @@ def generate_certificate(current_user):
         quarter = data.get('quarter', None)
         
         if not quarter:
-            # Generate the current quarter if not provided
             now = datetime.utcnow()
             year = now.year
             month = now.month
@@ -1033,7 +758,6 @@ def generate_certificate(current_user):
                 
             quarter = f"Q{quarter_num}-{year}"
         
-        # Find the most recent approved proof submission
         proof_submission = ProofSubmission.query.filter_by(
             user_id=current_user.id,
             status='approved'
@@ -1045,14 +769,11 @@ def generate_certificate(current_user):
                 "message": "No approved verification found"
             }), 404
         
-        # Check if a certificate already exists for this submission
         existing_cert = DigitalCertificate.query.filter_by(
             proof_submission_id=proof_submission.id
         ).first()
         
         if existing_cert:
-            # Return the existing certificate
-            # Parse content snapshot if it exists
             content_snapshot = None
             if existing_cert.content_snapshot:
                 try:
@@ -1074,7 +795,6 @@ def generate_certificate(current_user):
                 }
             }), 200
         
-        # Create a content snapshot with user details
         user_details = current_user.user_details
         
         if not user_details:
@@ -1092,14 +812,13 @@ def generate_certificate(current_user):
             "verification_method": "Facial Recognition & ID Verification",
             "quarter": quarter,
             "issue_date": datetime.utcnow().isoformat(),
-            "expiry_date": None  # Could calculate based on quarter end
+            "expiry_date": None  
         }
         
-        # Generate a hash for digital signature (in a real app, use proper PKI)
+
         content_str = json.dumps(content, sort_keys=True)
         digital_signature = hashlib.sha256(content_str.encode()).hexdigest()
         
-        # Create the certificate
         new_certificate = DigitalCertificate(
             user_id=current_user.id,
             proof_submission_id=proof_submission.id,
@@ -1111,11 +830,10 @@ def generate_certificate(current_user):
         
         db.session.add(new_certificate)
         
-        # Update or create quarter verification
         quarter_verification = QuarterVerification.query.filter_by(
             user_id=current_user.id,
-            quarter=quarter.split('-')[0],  # Extract Q1, Q2, etc.
-            year=int(quarter.split('-')[1])  # Extract year
+            quarter=quarter.split('-')[0],  
+            year=int(quarter.split('-')[1]) 
         ).first()
         
         if quarter_verification:
@@ -1123,7 +841,6 @@ def generate_certificate(current_user):
             quarter_verification.verified_at = datetime.utcnow()
             quarter_verification.proof_submission_id = proof_submission.id
         else:
-            # If quarter verification doesn't exist, create it
             quarter_verification = QuarterVerification(
                 user_id=current_user.id,
                 quarter=quarter.split('-')[0],
@@ -1131,7 +848,7 @@ def generate_certificate(current_user):
                 status='completed',
                 verified_at=datetime.utcnow(),
                 proof_submission_id=proof_submission.id,
-                due_date=datetime.utcnow()  # Set to current date or calculate proper due date
+                due_date=datetime.utcnow()  
             )
             db.session.add(quarter_verification)
         
@@ -1161,7 +878,6 @@ def generate_certificate(current_user):
             "error": str(e)
         }), 500
 
-
 @csrf.exempt
 @auth.route("/update-quarter-verification", methods=["POST"])
 @token_required
@@ -1181,7 +897,6 @@ def update_quarter_verification(current_user):
                 "message": "Quarter and status are required"
             }), 400
         
-        # Extract quarter number and year
         quarter_parts = quarter.split('-')
         if len(quarter_parts) != 2:
             return jsonify({
@@ -1192,7 +907,9 @@ def update_quarter_verification(current_user):
         quarter_num = quarter_parts[0]
         year = int(quarter_parts[1])
         
-        # Find or create the quarter verification
+        current_date = datetime.utcnow()
+        due_date = calculate_quarter_due_date(quarter_num, year, current_date)
+        
         quarter_verification = QuarterVerification.query.filter_by(
             user_id=current_user.id,
             quarter=quarter_num,
@@ -1205,7 +922,7 @@ def update_quarter_verification(current_user):
                 quarter=quarter_num,
                 year=year,
                 status=status,
-                due_date=datetime.utcnow(),  # Set properly in production
+                due_date=due_date, 
                 proof_submission_id=proof_submission_id
             )
             db.session.add(quarter_verification)
@@ -1238,7 +955,7 @@ def update_quarter_verification(current_user):
             "message": "Failed to update quarter verification",
             "error": str(e)
         }), 500
-    
+
 @csrf.exempt
 @auth.route("/update-account-status", methods=["POST"])
 @token_required
@@ -1256,7 +973,6 @@ def update_account_status(current_user):
                 "message": "Certificate ID is required"
             }), 400
             
-        # Find the certificate
         certificate = DigitalCertificate.query.filter_by(
             id=certificate_id,
             user_id=current_user.id
@@ -1268,15 +984,11 @@ def update_account_status(current_user):
                 "message": "Certificate not found"
             }), 404
             
-        # Update user's verification status
         user_details = current_user.user_details
         if user_details:
             user_details.last_verification = datetime.utcnow()
             
-        # Log this certificate view
         print(f"Life certificate {certificate_id} viewed by user {current_user.id}")
-        
-        # Create a notification for the user
         notification = Notification(
             user_id=current_user.id,
             type="certificate_viewed",
@@ -1302,7 +1014,7 @@ def update_account_status(current_user):
             "message": "Failed to update account status",
             "error": str(e)
         }), 500
-
+    
 @csrf.exempt
 @auth.route("/update-permissions", methods=["POST"])
 @token_required
@@ -1320,7 +1032,6 @@ def update_user_permissions(current_user):
                 "message": "Certificate ID is required"
             }), 400
             
-        # Find the certificate
         certificate = DigitalCertificate.query.filter_by(
             id=certificate_id
         ).first()
@@ -1330,22 +1041,26 @@ def update_user_permissions(current_user):
                 "success": False,
                 "message": "Certificate not found"
             }), 404
-            
-        # Update the user's active status
+
         user = User.query.get(certificate.user_id)
         if user:
-            user.is_active = True
-            
-            # You might want to set additional permissions here
-            # For example, if your User model has a permissions field:
-            # user.permissions = "verified_user"
+            if hasattr(User, 'is_active') and not isinstance(User.is_active, property):
+                user.is_active = True
+            else:
+                if hasattr(user, 'set_active_status'):
+                    user.set_active_status(True)
+                elif hasattr(user, 'active'):
+                    user.active = True
+                
+            permissions = data.get('permissions')
+            if permissions and hasattr(user, 'permissions'):
+                user.permissions = permissions
             
         quarter_parts = certificate.quarter.split('-')
         if len(quarter_parts) == 2:
             quarter_num = quarter_parts[0]
             year = int(quarter_parts[1])
             
-            # Update quarter verification status
             quarter_verification = QuarterVerification.query.filter_by(
                 user_id=certificate.user_id,
                 quarter=quarter_num,

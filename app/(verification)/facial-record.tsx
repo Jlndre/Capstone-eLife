@@ -22,7 +22,6 @@ import {
 
 const { width, height } = Dimensions.get("window");
 
-// Define proper interfaces for type safety
 interface VerificationStep {
   id: string;
   title: string;
@@ -35,7 +34,6 @@ export default function FacialRecord() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Component state
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
   const [captureInProgress, setCaptureInProgress] = useState(false);
@@ -44,7 +42,6 @@ export default function FacialRecord() {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isMounted, setIsMounted] = useState(true);
 
-  // Verification steps tracking
   const [verificationSteps, setVerificationSteps] = useState<
     VerificationStep[]
   >([
@@ -53,7 +50,6 @@ export default function FacialRecord() {
     { id: "face-match", title: "Identity Match", status: "pending" },
   ]);
 
-  // Fade in animation for UI elements
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -62,7 +58,6 @@ export default function FacialRecord() {
     }).start();
   }, [fadeAnim]);
 
-  // Set component as unmounted on cleanup
   useEffect(() => {
     setIsMounted(true);
     return () => {
@@ -81,14 +76,12 @@ export default function FacialRecord() {
       !captureInProgress &&
       !verificationInProgress
     ) {
-      // Check for face every 2 seconds
       faceDetectionInterval = setInterval(() => {
         if (!faceDetected && !captureInProgress && !verificationInProgress) {
           checkFaceDetection();
         }
       }, 2000);
 
-      // Initial check after a small delay
       initialCheckTimeout = setTimeout(() => {
         if (!faceDetected && !captureInProgress && !verificationInProgress) {
           checkFaceDetection();
@@ -96,7 +89,6 @@ export default function FacialRecord() {
       }, 500);
     }
 
-    // Cleanup
     return () => {
       if (faceDetectionInterval !== null) {
         clearInterval(faceDetectionInterval);
@@ -113,7 +105,6 @@ export default function FacialRecord() {
     verificationInProgress,
   ]);
 
-  // Update verification step status
   const updateVerificationStep = (
     stepId: string,
     status: VerificationStep["status"]
@@ -125,7 +116,6 @@ export default function FacialRecord() {
     );
   };
 
-  // Check for face detection using API
   const checkFaceDetection = async () => {
     if (
       !isMounted ||
@@ -138,7 +128,6 @@ export default function FacialRecord() {
     }
 
     try {
-      // Take a photo to analyze
       const pictureOptions: CameraPictureOptions = {
         quality: 0.5,
         skipProcessing: true,
@@ -153,8 +142,6 @@ export default function FacialRecord() {
         console.error("Error taking picture for face detection:", err);
         return;
       }
-
-      // Create form data for API request
       const formData = new FormData();
       formData.append("image", {
         uri: photo.uri,
@@ -162,16 +149,14 @@ export default function FacialRecord() {
         name: "face-check.jpg",
       } as any);
 
-      // Get JWT token for authentication
       const token = await SecureStore.getItemAsync("jwt");
 
-      // Add timeout to API call to prevent hanging
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       try {
         const response = await fetch(
-          "https://b018-63-143-118-227.ngrok-free.app/detect-face",
+          "https://09c6-208-131-174-130.ngrok-free.app/detect-face",
           {
             method: "POST",
             headers: {
@@ -366,7 +351,7 @@ export default function FacialRecord() {
       try {
         // Send request to backend API
         const response = await fetch(
-          "https://b018-63-143-118-227.ngrok-free.app/verify-images",
+          "https://09c6-208-131-174-130.ngrok-free.app/verify-images",
           {
             method: "POST",
             headers: {
@@ -487,14 +472,12 @@ export default function FacialRecord() {
     updateVerificationStep("face-match", "pending");
   };
 
-  // Safe navigation function
   const navigateTo = (route: string) => {
     if (isMounted) {
-      router.replace(route);
+      router.replace("/");
     }
   };
 
-  // Loading state while permissions are being checked
   if (!permission) {
     return (
       <View style={styles.loadingContainer}>
@@ -504,7 +487,6 @@ export default function FacialRecord() {
     );
   }
 
-  // Handle permission denied
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.container}>
@@ -528,7 +510,7 @@ export default function FacialRecord() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigateTo("/")}
+          onPress={() => navigateTo(Routes.Home)}
         >
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>

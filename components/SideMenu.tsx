@@ -1,4 +1,4 @@
-import { ProfileInitials } from "@/assets/images";
+import { Images, ProfileInitials } from "@/assets/images";
 import { Routes } from "@/constants/routes";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -62,7 +62,7 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
         try {
           const token = await SecureStore.getItemAsync("jwt");
           const res = await fetch(
-            "https://b018-63-143-118-227.ngrok-free.app/profile",
+            "https://09c6-208-131-174-130.ngrok-free.app/profile",
             {
               headers: { Authorization: `Bearer ${token}` },
             }
@@ -97,39 +97,37 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
     {
       icon: "home-outline",
       text: "Home",
-      path: "/(tabs)" as const,
+      path: Routes.Home,
       component: Ionicons,
     },
     {
       icon: "check-circle-outline",
       text: "My Profile",
-      path: "/Profile" as const,
+      path: Routes.Profile,
       component: MaterialIcons,
     },
     {
       icon: "document-text-outline",
       text: "View Recent Life Certificates",
-      path: "/PensionHistory" as const,
+      path: Routes.PensionHistory,
       component: Ionicons,
     },
     {
       icon: "notifications-outline",
       text: "Notifications",
-      path: "/Notification" as const,
+      path: Routes.Notifications,
       component: Ionicons,
     },
     {
       icon: "settings-outline",
       text: "Settings",
-      path: "/Settings" as const,
+      path: Routes.Settings,
       component: Ionicons,
     },
   ];
 
   const profileLetter = profile?.firstname?.charAt(0).toUpperCase() || "A";
-  const profileImage =
-    ProfileInitials[profileLetter] ||
-    require("../assets/images/profilepic.png");
+  const profileImage = ProfileInitials[profileLetter] || Images.ProfilePicture;
 
   return (
     <Modal
@@ -166,9 +164,7 @@ export default function SideMenuDrawer({ visible, onClose }: Props) {
                 key={index}
                 onPress={() => {
                   onClose();
-                  router.replace(
-                    item.path as (typeof Routes)[keyof typeof Routes]
-                  );
+                  router.replace(item.path);
                 }}
                 style={styles.menuItem}
                 activeOpacity={0.7}

@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Define Certificate type
 type Certificate = {
   id: string;
   date: string;
@@ -37,10 +36,8 @@ export default function PensionHistory() {
           setLoading(false);
           return;
         }
-
-        // Make API request with Authorization header
         const response = await fetch(
-          "https://b018-63-143-118-227.ngrok-free.app/verification-history",
+          "https://09c6-208-131-174-130.ngrok-free.app/verification-history",
           {
             method: "GET",
             headers: {

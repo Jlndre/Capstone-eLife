@@ -120,7 +120,7 @@ const LoginScreen: React.FC = () => {
 
     try {
       const response = await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/login",
+        "https://09c6-208-131-174-130.ngrok-free.app/login",
         {
           method: "POST",
           headers: {
@@ -134,10 +134,10 @@ const LoginScreen: React.FC = () => {
       );
 
       const text = await response.text();
-      console.log("RAW RESPONSE:", text); // Debug HTML vs JSON
+      console.log("RAW RESPONSE:", text);
 
       try {
-        const data = JSON.parse(text); // Safely parse
+        const data = JSON.parse(text);
 
         if (data.token) {
           await SecureStore.setItemAsync("jwt", data.token);
@@ -284,13 +284,6 @@ const LoginScreen: React.FC = () => {
                 <Text style={styles.resetText}>Reset here</Text>
               </Text>
             </TouchableOpacity>
-
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Don't have an account?{" "}
-                <Text style={styles.signUpText}>Sign Up</Text>
-              </Text>
-            </View>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -426,9 +419,5 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 14,
     color: "#555",
-  },
-  signUpText: {
-    color: "#0B1741",
-    fontWeight: "bold",
   },
 });

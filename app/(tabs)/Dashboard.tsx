@@ -34,7 +34,6 @@ interface QuarterData {
   year?: number;
 }
 
-// Reusable empty state component
 type EmptyStateCardProps = {
   message: string;
   icon?: keyof typeof Ionicons.glyphMap;
@@ -82,7 +81,6 @@ export default function DashboardScreen() {
   const [completedQuarters, setCompletedQuarters] = useState<QuarterData[]>([]);
   const [missedQuarters, setMissedQuarters] = useState<QuarterData[]>([]);
 
-  // Combined past quarters for display
   const pastQuarters = [...completedQuarters, ...missedQuarters].sort(
     (a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
   );
@@ -99,7 +97,7 @@ export default function DashboardScreen() {
     try {
       const token = await SecureStore.getItemAsync("jwt");
       const res = await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/api/dashboard-summary",
+        "https://09c6-208-131-174-130.ngrok-free.app/api/dashboard-summary",
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -110,7 +108,6 @@ export default function DashboardScreen() {
       const data = await res.json();
       if (res.ok) {
         setName(data.name);
-        // Extracting first name for profile image logic
         setFirstname(data.name.split(" ")[0]);
         setYear(data.year);
         setAccountStatus(data.active ? "Active" : "Inactive");
@@ -142,11 +139,9 @@ export default function DashboardScreen() {
 
   const handleQuarterCompletion = async () => {
     try {
-      const token = await SecureStore.getItemAsync("user_token");
-      // Simulating API call to complete verification
-      // In production, this would be a real verification process
+      const token = await SecureStore.getItemAsync("jwt");
       const res = await fetch(
-        `http://10.22.17.226:5001/api/test-complete/${currentQuarter?.quarter}`,
+        `https://09c6-208-131-174-130.ngrok-free.app/api/test-complete/${currentQuarter?.quarter}`,
         {
           method: "POST",
           headers: {
@@ -157,7 +152,6 @@ export default function DashboardScreen() {
       );
 
       if (res.ok) {
-        // Refresh dashboard data to show updated status
         fetchDashboardData();
         Alert.alert(
           "Verification Complete",
@@ -181,7 +175,6 @@ export default function DashboardScreen() {
     setModalVisible(true);
   };
 
-  // Getting profile image based on first letter of first name
   const profileLetter = firstname?.charAt(0).toUpperCase() || "A";
   const profileImage = ProfileInitials[profileLetter] || Images.ProfilePicAlt;
 
@@ -224,13 +217,8 @@ export default function DashboardScreen() {
                 <Text style={styles.cardTitle}>
                   Current Quarter Verification
                 </Text>
-                <TouchableOpacity>
-                  <MaterialIcons
-                    name="refresh"
-                    size={20}
-                    color="#999"
-                    onPress={fetchDashboardData}
-                  />
+                <TouchableOpacity onPress={fetchDashboardData}>
+                  <MaterialIcons name="refresh" size={20} color="#999" />
                 </TouchableOpacity>
               </View>
               <View style={styles.underline} />
@@ -386,7 +374,7 @@ export default function DashboardScreen() {
                 ))
               ) : (
                 <EmptyStateCard
-                  message="You haven't proved you're alive this year"
+                  message="No past verifications to display"
                   icon="folder-outline"
                 />
               )}

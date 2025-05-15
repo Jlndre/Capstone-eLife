@@ -13,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useVerificationSuccess } from "../../hooks/useVerificationSuccess"; // Import the hook
+import { useVerificationSuccess } from "../../hooks/useVerificationSuccess";
 
 const { width, height } = Dimensions.get("window");
 
@@ -23,8 +23,6 @@ const CertificateGeneratedScreen = () => {
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const [showButton, setShowButton] = useState(false);
   const [localProcessing, setLocalProcessing] = useState(false);
-
-  // Use the verification success hook
   const { handleLifeCertificateViewed, isProcessing, error } =
     useVerificationSuccess();
 
@@ -43,38 +41,32 @@ const CertificateGeneratedScreen = () => {
         easing: Easing.out(Easing.exp),
       }),
     ]).start(() => {
-      // Show button after animation completes
       setTimeout(() => setShowButton(true), 500);
     });
   }, []);
 
-  // Handle viewing the certificate and all the associated state changes
   const handleViewCertificate = async () => {
     try {
-      setLocalProcessing(true); // Add local processing state
+      setLocalProcessing(true);
 
-      // Call the hook to handle all state changes
       console.log("Calling handleLifeCertificateViewed");
       await handleLifeCertificateViewed();
       console.log("handleLifeCertificateViewed completed successfully");
 
-      // If successful, navigate to the certificate view
       console.log(`Navigating to: ${Routes.PensionHistory}`);
       router.push(Routes.PensionHistory);
     } catch (err) {
       console.error("Error in handleViewCertificate:", err);
-      // Show error if something goes wrong
       Alert.alert(
         "Error",
         "There was a problem preparing your Life Certificate. Please try again.",
         [{ text: "OK" }]
       );
     } finally {
-      setLocalProcessing(false); // Ensure local processing state is reset
+      setLocalProcessing(false);
     }
   };
 
-  // Use combined processing state from both local and hook
   const isButtonDisabled = isProcessing || localProcessing;
 
   return (

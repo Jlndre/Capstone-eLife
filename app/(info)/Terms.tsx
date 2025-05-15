@@ -36,13 +36,10 @@ export default function TermsAndConditionsScreen() {
 
     setIsLoading(true);
     try {
-      // Save acceptance status to secure storage
       await SecureStore.setItemAsync("termsAccepted", "true");
-
-      // Optionally notify backend
       const token = await SecureStore.getItemAsync("jwt");
       await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/profile/accept-terms",
+        "https://09c6-208-131-174-130.ngrok-free.app/profile/accept-terms",
         {
           method: "POST",
           headers: {
@@ -52,7 +49,6 @@ export default function TermsAndConditionsScreen() {
         }
       );
 
-      // Navigate to home screen
       setTimeout(() => {
         setIsLoading(false);
         router.replace(Routes.Home);

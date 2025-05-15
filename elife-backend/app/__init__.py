@@ -36,7 +36,7 @@ def create_app():
     else:
         raise FileNotFoundError("Firebase service account key not found. Expected at: firebase/serviceAccountKey.json")
 
-    from app import views  # 👈 This runs the entire views.py file
+    from app import views 
     app.register_blueprint(views.auth)
 
     return app

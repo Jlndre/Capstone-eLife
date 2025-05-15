@@ -23,27 +23,20 @@ const Step2VerificationScreen = () => {
   const [count, setCount] = useState(5);
   const animatedValue = new Animated.Value(0);
 
-  // Reset state when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      // Reset the countdown state when the screen is focused
       setShowCountdown(false);
       setCount(5);
       animatedValue.setValue(0);
 
-      return () => {
-        // Cleanup if needed
-      };
+      return () => {};
     }, [])
   );
-
-  // Handle the countdown animation
   useEffect(() => {
     let timer: number;
 
     if (showCountdown) {
       if (count > 0) {
-        // Animate the number scaling on each count change
         Animated.sequence([
           Animated.timing(animatedValue, {
             toValue: 1,
@@ -57,23 +50,18 @@ const Step2VerificationScreen = () => {
           }),
         ]).start();
 
-        // Decrement the counter after 1 second
         timer = setTimeout(() => {
           setCount(count - 1);
         }, 1000);
       } else {
-        // When countdown finishes, navigate to facial record screen
         router.push(Routes.FacialRecord);
       }
     }
-
-    // Clear the timer when the component unmounts or when dependencies change
     return () => {
       if (timer) clearTimeout(timer);
     };
   }, [showCountdown, count, router]);
 
-  // Animation styles for the countdown
   const countdownScale = animatedValue.interpolate({
     inputRange: [0, 0.5, 1],
     outputRange: [0.8, 1.2, 1],

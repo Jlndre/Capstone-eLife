@@ -80,10 +80,8 @@ const UploadPhotoIDScreen = () => {
   const uploadPhotoID = async () => {
     if (!file) return;
 
-    // Set uploading state to true
     setIsUploading(true);
 
-    // Navigate to loading screen
     router.push(Routes.CheckingUpload);
 
     const formData = new FormData();
@@ -96,7 +94,7 @@ const UploadPhotoIDScreen = () => {
     try {
       const token = await SecureStore.getItemAsync("jwt");
       const response = await fetch(
-        "https://b018-63-143-118-227.ngrok-free.app/verify-id-upload",
+        "https://09c6-208-131-174-130.ngrok-free.app/verify-id-upload",
         {
           method: "POST",
           headers: {
@@ -121,15 +119,12 @@ const UploadPhotoIDScreen = () => {
         return;
       }
 
-      // Reset file after upload attempt
       setFile(null);
 
       if (response.ok) {
-        // Check if verification was successful and proceed to facial verification
         if (data.next_step === "facial_verification") {
           router.push(Routes.Step2Verification);
         } else {
-          // If verification has issues, go to error screen
           router.push({
             pathname: Routes.UploadError,
             params: {
@@ -140,7 +135,6 @@ const UploadPhotoIDScreen = () => {
           });
         }
       } else {
-        // Handle API error response
         router.push({
           pathname: Routes.UploadError,
           params: {
