@@ -1,9 +1,9 @@
 import { Images } from "@/assets/images";
 import { Routes } from "@/constants/routes";
-import { saveToken } from "@/utils/auth";
 import { API_BASE_URL } from "@/utils/config";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -32,125 +32,77 @@ interface LoginCredentials {
 
 const LoginScreen: React.FC = () => {
   const router = useRouter();
-  const [credentials, setCredentials] = useState<LoginCredentials>({
-    userId: "",
-    password: "",
-  });
+
+  const [credentials, setCredentials] = useState<LoginCredentials>({ userId: "", password: "" });
   const [errors, setErrors] = useState<Partial<LoginCredentials>>({});
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isButtonActive, setIsButtonActive] = useState<boolean>(false);
-  const [keyboardVisible, setKeyboardVisible] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isButtonActive, setIsButtonActive] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      "keyboardDidShow",
-      () => setKeyboardVisible(true)
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      "keyboardDidHide",
-      () => setKeyboardVisible(false)
-    );
-
+    const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
     return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
+      showSub.remove();
+      hideSub.remove();
     };
   }, []);
 
   useEffect(() => {
-    if (credentials.userId.trim() && credentials.password.trim()) {
-      setIsButtonActive(true);
-    } else {
-      setIsButtonActive(false);
-    }
+    const { userId, password } = credentials;
+    setIsButtonActive(userId.trim() !== "" && password.trim() !== "");
   }, [credentials]);
 
   const formatPensionerId = (value: string): string => {
-    const digitsOnly = value.replace(/\D/g, "");
-
-    let formatted = "";
-    if (digitsOnly.length <= 3) {
-      formatted = digitsOnly;
-    } else if (digitsOnly.length <= 6) {
-      formatted = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
-    } else {
-      formatted = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(
-        3,
-        6
-      )}-${digitsOnly.slice(6, 10)}`;
-    }
-
-    return formatted;
+    const digits = value.replace(/\D/g, "");
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
   };
 
   const handleChange = (field: keyof LoginCredentials, value: string) => {
-    let updatedValue = value;
-
-    if (field === "userId") {
-      updatedValue = formatPensionerId(value);
-    }
-
+    const updatedValue = field === "userId" ? formatPensionerId(value) : value;
     setCredentials((prev) => ({ ...prev, [field]: updatedValue }));
-
-    if (errors[field]) {
-      setErrors((prev) => ({ ...prev, [field]: undefined }));
-    }
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
   const validateForm = (): boolean => {
     const newErrors: Partial<LoginCredentials> = {};
-
-    if (!/^\d{3}-\d{3}-\d{4}$/.test(credentials.userId)) {
-      newErrors.userId = "Please enter a valid ID in format 000-000-0000";
-    }
-
-    if (credentials.password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters";
-    }
-
+    if (!/^\d{3}-\d{3}-\d{4}$/.test(credentials.userId)) newErrors.userId = "Please enter a valid ID in format 000-000-0000";
+    if (credentials.password.length < 8) newErrors.password = "Password must be at least 8 characters";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleLogin = async () => {
     if (!validateForm()) return;
-
     setIsLoading(true);
-
     try {
       const response = await fetch(`${API_BASE_URL}/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pensioner_number: credentials.userId.replace(/-/g, ""), // Cleaned format
+          pensioner_number: credentials.userId.replace(/-/g, ""),
           password: credentials.password,
         }),
       });
 
       const text = await response.text();
-      console.log("RAW RESPONSE:", text); // Debug HTML vs JSON
-
       try {
-        const data = JSON.parse(text); // Safely parse
-
+        const data = JSON.parse(text);
         if (data.token) {
-          await saveToken(data.token);
+          await SecureStore.setItemAsync("jwt", data.token);
           router.replace(Routes.Home);
         } else {
           Alert.alert("Login failed", data.message || "Unknown error occurred");
         }
-      } catch (jsonError) {
-        console.error("JSON parse failed:", jsonError);
-        Alert.alert(
-          "Error",
-          "Unexpected server response. Please check the backend logs."
-        );
+      } catch (err) {
+        console.error("JSON parse error:", err);
+        Alert.alert("Error", "Unexpected server response. Please check backend logs.");
       }
-    } catch (error) {
-      console.error("Login error:", error);
+    } catch (err) {
+      console.error("Login error:", err);
       Alert.alert("Error", "Login failed. Please try again.");
     } finally {
       setIsLoading(false);
@@ -171,26 +123,14 @@ const LoginScreen: React.FC = () => {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={{ flex: 1 }}
-        >
-          <View
-            style={[
-              styles.imageContainer,
-              keyboardVisible && styles.imageContainerSmall,
-            ]}
-          >
-            <ImageBackground
-              source={Images.LoginHeader}
-              style={styles.image}
-              resizeMode="cover"
-            >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <View style={[styles.imageContainer, keyboardVisible && styles.imageContainerSmall]}>
+            <ImageBackground source={Images.LoginHeader} style={styles.image} resizeMode="cover">
               <View style={styles.curve}>
                 <Svg height="100%" width="100%" viewBox="0 0 1440 200">
                   <Path
                     fill="#fff"
-                    d="M0,128L48,138.7C96,149,192,171,288,160C384,149,480,107,576,112C672,117,768,171,864,186.7C960,203,1056,181,1152,154.7C1248,128,1344,96,1392,80L1440,64L1440,200L1392,200C1344,200,1248,200,1152,200C1056,200,960,200,864,200C768,200,672,200,576,200C480,200,384,200,288,200C192,200,96,200,48,200L0,200Z"
+                    d="M0,128L48,138.7C96,149,192,171,288,160C384,149,480,107,576,112C672,117,768,171,864,186.7C960,203,1056,181,1152,154.7C1248,128,1344,96,1392,80L1440,64L1440,200L0,200Z"
                   />
                 </Svg>
               </View>
@@ -204,90 +144,55 @@ const LoginScreen: React.FC = () => {
             <View style={styles.inputContainer}>
               <TextInput
                 placeholder="000-000-0000"
-                style={[styles.input, errors.userId ? styles.inputError : null]}
+                style={[styles.input, errors.userId && styles.inputError]}
                 placeholderTextColor="#999"
                 keyboardType="phone-pad"
                 value={credentials.userId}
                 onChangeText={(text) => handleChange("userId", text)}
                 maxLength={12}
               />
-              {credentials.userId ? (
-                <TouchableOpacity
-                  style={styles.clearButton}
-                  onPress={() => handleChange("userId", "")}
-                >
+              {credentials.userId && (
+                <TouchableOpacity style={styles.clearButton} onPress={() => handleChange("userId", "")}> 
                   <Ionicons name="close-circle" size={20} color="#999" />
                 </TouchableOpacity>
-              ) : null}
+              )}
             </View>
             {errors.userId ? (
               <Text style={styles.errorText}>{errors.userId}</Text>
             ) : (
-              <Text style={styles.helperText}>
-                Enter your ID in format: 000-000-0000
-              </Text>
+              <Text style={styles.helperText}>Enter your ID in format: 000-000-0000</Text>
             )}
 
             <Text style={styles.label}>Password:</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 placeholder="Enter your password"
-                style={[
-                  styles.input,
-                  errors.password ? styles.inputError : null,
-                ]}
+                style={[styles.input, errors.password && styles.inputError]}
                 placeholderTextColor="#999"
                 secureTextEntry={!showPassword}
                 value={credentials.password}
                 onChangeText={(text) => handleChange("password", text)}
               />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword(!showPassword)}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off" : "eye"}
-                  size={22}
-                  color="#0B1741"
-                />
+              <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(!showPassword)}>
+                <Ionicons name={showPassword ? "eye-off" : "eye"} size={22} color="#0B1741" />
               </TouchableOpacity>
             </View>
-            {errors.password ? (
-              <Text style={styles.errorText}>{errors.password}</Text>
-            ) : null}
+            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
 
             <TouchableOpacity
-              style={[
-                styles.signInButton,
-                isButtonActive ? styles.activeButton : styles.inactiveButton,
-              ]}
+              style={[styles.signInButton, isButtonActive ? styles.activeButton : styles.inactiveButton]}
               onPress={handleLogin}
               disabled={!isButtonActive || isLoading}
               activeOpacity={0.7}
             >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.signInText}>Sign In</Text>
-              )}
+              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.signInText}>Sign In</Text>}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.forgotContainer}
-              onPress={handleForgotPassword}
-            >
+            <TouchableOpacity style={styles.forgotContainer} onPress={handleForgotPassword}>
               <Text style={styles.forgotText}>
-                Forgot Password?{" "}
-                <Text style={styles.resetText}>Reset here</Text>
+                Forgot Password? <Text style={styles.resetText}>Reset here</Text>
               </Text>
             </TouchableOpacity>
-
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Don't have an account?{" "}
-                <Text style={styles.signUpText}>Sign Up</Text>
-              </Text>
-            </View>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -423,9 +328,5 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 14,
     color: "#555",
-  },
-  signUpText: {
-    color: "#0B1741",
-    fontWeight: "bold",
   },
 });

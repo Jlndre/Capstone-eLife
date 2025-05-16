@@ -1,13 +1,14 @@
 import { Images } from "@/assets/images";
 import { Routes } from "@/constants/routes";
-import { getToken } from "@/utils/auth";
 import { API_BASE_URL } from "@/utils/config";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Camera } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Image,
   SafeAreaView,
@@ -29,13 +30,14 @@ interface FileData {
 const UploadPhotoIDScreen = () => {
   const router = useRouter();
   const [file, setFile] = useState<FileData | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        alert("We need permissions to access your photo library.");
+        Alert.alert("Permission Denied", "We need photo access permission.");
       }
     })();
   }, []);
@@ -59,7 +61,7 @@ const UploadPhotoIDScreen = () => {
   const pickFromCamera = async () => {
     const { status } = await Camera.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      alert("Camera permission is required!");
+      Alert.alert("Permission Required", "Camera permission is required!");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -75,58 +77,92 @@ const UploadPhotoIDScreen = () => {
       });
     }
   };
+
   const uploadPhotoID = async () => {
     if (!file) return;
-  
+
+    setIsUploading(true);
+
+    router.push(Routes.CheckingUpload);
+
     const formData = new FormData();
     formData.append("id_image", {
       uri: file.uri,
       name: file.name,
       type: file.type,
     } as any);
-  
+
     try {
-      const token = await getToken(); // or SecureStore.getItemAsync("jwt")
-      const response = await fetch(`${API_BASE_URL}/verify-id-upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          // DO NOT SET Content-Type manually for multipart — let fetch set it
-        },
-        body: formData,
-      });
-  
-      const text = await response.text(); // get raw body before parsing
+      const token = await SecureStore.getItemAsync("jwt");
+      const response = await fetch(
+        `${API_BASE_URL}/verify-id-upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        }
+      );
+
+      const text = await response.text();
       console.log("RAW RESPONSE:", text);
-  
+
       let data;
       try {
         data = JSON.parse(text);
       } catch (jsonErr) {
         console.error("JSON parse failed:", jsonErr);
-        throw new Error("Server did not return valid JSON");
+        router.push({
+          pathname: Routes.UploadError,
+          params: { message: "Server returned invalid response" },
+        });
+        return;
       }
-  
+
+      setFile(null);
+
       if (response.ok) {
-        router.push(Routes.Step2Verification);
+        if (data.next_step === "facial_verification") {
+          router.push(Routes.Step2Verification);
+        } else {
+          router.push({
+            pathname: Routes.UploadError,
+            params: {
+              message:
+                data.message ||
+                "Verification passed partially. Please try again or contact support.",
+            },
+          });
+        }
       } else {
-        alert(data.message || "Verification failed. Please try again.");
+        router.push({
+          pathname: Routes.UploadError,
+          params: {
+            message: data.message || "ID verification failed.",
+          },
+        });
       }
     } catch (error) {
       console.error("Upload error:", error);
-      alert("An error occurred during upload. Please check your connection or try again.");
+      router.push({
+        pathname: Routes.UploadError,
+        params: {
+          message: "Network error. Please check your connection.",
+        },
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
-  
-  
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerSection}>
         <Text style={styles.stepTitle}>Step 1: Upload Photo ID</Text>
         <Text style={styles.instruction}>
-          Please upload a valid government issued photo ID eg. NIDS Card,
-          National ID, Driver's License, Passport.
+          Please upload a valid government-issued photo ID (e.g., NIDS, Driver's
+          License, Passport).
         </Text>
         <View style={styles.curve}>
           <Svg height="100%" width="100%" viewBox="0 0 1440 320">
@@ -145,7 +181,11 @@ const UploadPhotoIDScreen = () => {
       />
 
       <View style={styles.uploadCard}>
-        <TouchableOpacity style={styles.uploadButton} onPress={pickFromCamera}>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={pickFromCamera}
+          disabled={isUploading}
+        >
           <Ionicons
             name="camera"
             size={20}
@@ -161,19 +201,21 @@ const UploadPhotoIDScreen = () => {
           <View style={styles.separator} />
         </View>
 
-        <TouchableOpacity style={styles.uploadButton} onPress={pickFromGallery}>
+        <TouchableOpacity
+          style={styles.uploadButton}
+          onPress={pickFromGallery}
+          disabled={isUploading}
+        >
           <MaterialIcons
             name="photo-library"
             size={20}
             color="white"
             style={{ marginRight: 8 }}
           />
-          <Text style={styles.uploadText}>Select Photo from Gallery</Text>
+          <Text style={styles.uploadText}>Select from Gallery</Text>
         </TouchableOpacity>
 
-        <Text style={styles.fileTypesText}>
-          Accepted Photo types: .png, .jpg
-        </Text>
+        <Text style={styles.fileTypesText}>Accepted types: .jpg, .png</Text>
 
         {file && (
           <View style={styles.filePreview}>
@@ -186,19 +228,22 @@ const UploadPhotoIDScreen = () => {
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => router.push(Routes.StartProcess)}
+        disabled={isUploading}
       >
         <Text style={styles.backButtonText}>Go back</Text>
       </TouchableOpacity>
 
       {file && (
         <TouchableOpacity
-          style={styles.nextButton}
-          onPress={uploadPhotoID} // changed from router.push
+          style={[styles.nextButton, isUploading && styles.disabledButton]}
+          onPress={uploadPhotoID}
+          disabled={isUploading}
         >
-          <Text style={styles.nextButtonText}>Next</Text>
+          <Text style={styles.nextButtonText}>
+            {isUploading ? "Processing..." : "Next"}
+          </Text>
         </TouchableOpacity>
       )}
-
     </SafeAreaView>
   );
 };
@@ -335,5 +380,9 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 16,
+  },
+  disabledButton: {
+    backgroundColor: "#ddd",
+    elevation: 0,
   },
 });

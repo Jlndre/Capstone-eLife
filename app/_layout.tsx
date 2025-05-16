@@ -1,27 +1,23 @@
-import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
-} from "@react-navigation/native";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { Drawer } from "expo-router/drawer";
 import * as SplashScreen from "expo-splash-screen";
-import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import "react-native-reanimated";
-import { Drawer } from "expo-router/drawer";
 
 import { useColorScheme } from "@/hooks/useColorScheme";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
+// Prevent splash screen from auto-hiding until fonts are loaded
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Load custom fonts
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
 
+  // Hide splash screen once fonts are ready
   useEffect(() => {
     if (loaded) {
       SplashScreen.hideAsync();
@@ -36,16 +32,14 @@ export default function RootLayout() {
     <Drawer
       screenOptions={{
         headerShown: false,
-        // You can style the drawer here. E.g.:
-        drawerType: "front", // or 'slide', 'back', etc.
+        drawerType: "front",
         drawerStyle: { width: 250 },
       }}
     >
-      {/* Inside the Drawer, we place our (drawer) layout */}
       <Drawer.Screen
         name="(drawer)"
         options={{
-          drawerLabel: "Main Menu", // or hide if you want custom
+          drawerLabel: "Main Menu",
         }}
       />
     </Drawer>

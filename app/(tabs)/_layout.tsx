@@ -10,6 +10,19 @@ import { Platform, View } from "react-native";
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
+  const indicator = (focused: boolean) =>
+    focused && Platform.OS === "ios" ? (
+      <View
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: 2.5,
+          backgroundColor: Colors[colorScheme ?? "light"].tint,
+          marginTop: 4,
+        }}
+      />
+    ) : null;
+
   return (
     <Tabs
       screenOptions={{
@@ -54,7 +67,6 @@ export default function TabLayout() {
         },
       }}
     >
-      {/* Home tab (index.tsx) */}
       <Tabs.Screen
         name="Home"
         options={{
@@ -62,23 +74,12 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <View style={{ alignItems: "center" }}>
               <IconSymbol size={28} name="house.fill" color={color} />
-              {focused && Platform.OS === "ios" && (
-                <View
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: 2.5,
-                    backgroundColor: Colors[colorScheme ?? "light"].tint,
-                    marginTop: 4,
-                  }}
-                />
-              )}
+              {indicator(focused)}
             </View>
           ),
         }}
       />
 
-      {/* Dashboard tab */}
       <Tabs.Screen
         name="Dashboard"
         options={{
@@ -86,23 +87,12 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <View style={{ alignItems: "center" }}>
               <IconSymbol size={28} name="person.crop.square" color={color} />
-              {focused && Platform.OS === "ios" && (
-                <View
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: 2.5,
-                    backgroundColor: Colors[colorScheme ?? "light"].tint,
-                    marginTop: 4,
-                  }}
-                />
-              )}
+              {indicator(focused)}
             </View>
           ),
         }}
       />
 
-      {/* Settings tab */}
       <Tabs.Screen
         name="Settings"
         options={{
@@ -110,17 +100,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <View style={{ alignItems: "center" }}>
               <IconSymbol size={28} name="gearshape.fill" color={color} />
-              {focused && Platform.OS === "ios" && (
-                <View
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: 2.5,
-                    backgroundColor: Colors[colorScheme ?? "light"].tint,
-                    marginTop: 4,
-                  }}
-                />
-              )}
+              {indicator(focused)}
             </View>
           ),
         }}

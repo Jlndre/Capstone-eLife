@@ -1,8 +1,11 @@
 import { Routes } from "@/constants/routes";
+import { API_BASE_URL } from "@/utils/config";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import * as SecureStore from "expo-secure-store";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   StyleSheet,
   Text,
@@ -11,20 +14,55 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Example mock data for the past 2 years
-const mockCertificates = [
-  { id: "1", date: "March 12, 2025", status: "Verified" },
-  { id: "2", date: "December 10, 2024", status: "Verified" },
-  { id: "3", date: "September 8, 2024", status: "Verified" },
-  { id: "4", date: "June 6, 2024", status: "Verified" },
-  { id: "5", date: "March 4, 2024", status: "Verified" },
-  { id: "6", date: "December 1, 2023", status: "Verified" },
-  { id: "7", date: "September 2, 2023", status: "Verified" },
-  { id: "8", date: "June 1, 2023", status: "Verified" },
-];
+// Type definition for certificate
+type Certificate = {
+  id: string;
+  date: string;
+  status: string;
+};
 
 export default function PensionHistory() {
   const router = useRouter();
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch verification certificates on component mount
+  useEffect(() => {
+    const fetchCertificates = async () => {
+      try {
+        const token = await SecureStore.getItemAsync("jwt");
+        if (!token) {
+          setError("Authentication token not found");
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/verification-history`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setCertificates(data);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch verification history"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCertificates();
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -39,25 +77,37 @@ export default function PensionHistory() {
         <Text style={styles.title}>Pension History</Text>
       </View>
 
-      {/* List of Certificates */}
-      <FlatList
-        data={mockCertificates}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={24}
-              color="#1FAD66"
-            />
-            <View style={styles.cardInfo}>
-              <Text style={styles.cardDate}>{item.date}</Text>
-              <Text style={styles.cardStatus}>{item.status}</Text>
+      {/* Loading, Error, Empty, or List State */}
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#1F245E" />
+          <Text style={styles.loadingText}>Loading verification history...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : certificates.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="document-text-outline" size={64} color="#BBC0C4" />
+          <Text style={styles.emptyText}>No verification history found</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={certificates}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => (
+            <View style={styles.card}>
+              <Ionicons name="checkmark-circle-outline" size={24} color="#1FAD66" />
+              <View style={styles.cardInfo}>
+                <Text style={styles.cardDate}>{item.date}</Text>
+                <Text style={styles.cardStatus}>{item.status}</Text>
+              </View>
             </View>
-          </View>
-        )}
-      />
+          )}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -82,6 +132,30 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#1F245E",
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#2C3E50",
+    textAlign: "center",
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  errorText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#E53E3E",
+    textAlign: "center",
+  },
   listContent: {
     paddingBottom: 20,
   },
@@ -93,6 +167,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 12,
     elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   cardInfo: {
     marginLeft: 12,

@@ -1,5 +1,6 @@
 import { Images, ProfileInitials } from "@/assets/images";
 import { Routes } from "@/constants/routes";
+import { API_BASE_URL } from "@/utils/config";
 import { FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -42,10 +43,8 @@ export default function ProfileScreen() {
       setLoading(true);
       try {
         const token = await SecureStore.getItemAsync("jwt");
-        const res = await fetch("http://10.22.17.226:5001/profile", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const res = await fetch(`${API_BASE_URL}/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
         setProfile({
@@ -57,7 +56,7 @@ export default function ProfileScreen() {
           dateOfBirth: new Date(data.details.dob).toLocaleDateString(),
           pensionID: data.pensioner_number,
         });
-      } catch (err) {
+      } catch {
         Alert.alert("Error", "Failed to load profile");
       } finally {
         setLoading(false);
@@ -80,7 +79,6 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const updated = { ...profile, [editField]: tempValue };
-      // You should send this update to backend here
       setTimeout(() => {
         setProfile(updated);
         setIsEditing(false);
@@ -88,7 +86,7 @@ export default function ProfileScreen() {
         setLoading(false);
         Alert.alert("Success", "Profile updated");
       }, 1000);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to update");
       setLoading(false);
     }
@@ -128,11 +126,7 @@ export default function ProfileScreen() {
   if (!profile) {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator
-          size="large"
-          color="#1F245E"
-          style={{ marginTop: 100 }}
-        />
+        <ActivityIndicator size="large" color="#1F245E" style={{ marginTop: 100 }} />
       </SafeAreaView>
     );
   }
@@ -183,9 +177,7 @@ export default function ProfileScreen() {
               value={profile.phone}
             />
             <ProfileInfoItem
-              icon={
-                <Ionicons name="location-outline" size={20} color="#1F245E" />
-              }
+              icon={<Ionicons name="location-outline" size={20} color="#1F245E" />}
               label="address"
               value={profile.address}
             />

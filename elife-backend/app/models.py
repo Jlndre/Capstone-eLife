@@ -3,11 +3,13 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 from enum import Enum
+from sqlalchemy.dialects.postgresql import JSON
 
 class ProofStatus(Enum):
     PENDING = 'pending'
     APPROVED = 'approved'
     FLAGGED = 'flagged'
+
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -19,8 +21,12 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(512), nullable=False)
     role = db.Column(db.String(20), default='pensioner')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    terms_accepted = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)  
+    
+    permissions = db.Column(JSON, default=lambda: ["view_certificate"])  
 
-    # Relationships
+    
     user_details = db.relationship('UserDetails', backref='user', uselist=False, cascade='all, delete-orphan')
     proof_submissions = db.relationship('ProofSubmission', backref='user', lazy=True, cascade='all, delete-orphan')
     notifications = db.relationship('Notification', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -45,8 +51,8 @@ class UserDetails(db.Model):
     firstname = db.Column(db.String(100))
     lastname = db.Column(db.String(100))
     dob = db.Column(db.Date)
-    trn = db.Column(db.String(50))  # Tax Registration Number
-    nids_num = db.Column(db.String(50))  # National ID
+    trn = db.Column(db.String(50))  
+    nids_num = db.Column(db.String(50))  
     passport_num = db.Column(db.String(50))
     contact_num = db.Column(db.String(20))
     address = db.Column(db.Text)
@@ -62,12 +68,12 @@ class ProofSubmission(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     id_image_url = db.Column(db.String(255))
     video_url = db.Column(db.String(255))
-    status = db.Column(db.String(20), default='pending')  # 'pending', 'approved', 'flagged'
+    image_urls = db.Column(JSON)  
+    status = db.Column(db.String(20), default='pending') 
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
     verified_at = db.Column(db.DateTime)
-    notes = db.Column(db.Text)  # For reviewer notes
+    notes = db.Column(db.Text)  
     
-    # Relationships
     certificate = db.relationship('DigitalCertificate', backref='proof_submission', uselist=False)
     
     def __repr__(self):
@@ -84,7 +90,7 @@ class DigitalCertificate(db.Model):
     content_snapshot = db.Column(db.Text)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     digital_signature_hash = db.Column(db.String(512))
-    quarter = db.Column(db.String(20))  # e.g., "Q1-2025"
+    quarter = db.Column(db.String(20)) 
     
     def __repr__(self):
         return f'<Certificate {self.id} for User {self.user_id}>'
@@ -95,10 +101,13 @@ class Notification(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    type = db.Column(db.String(50))  # e.g., 'reminder', 'approval', 'rejection'
+    type = db.Column(db.String(50))  
     message = db.Column(db.Text)
+    target_quarter = db.Column(db.String(20))  
     sent_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_read = db.Column(db.Boolean, default=False)
+      
+
     
     def __repr__(self):
         return f'<Notification {self.id} for User {self.user_id}>'
@@ -110,7 +119,7 @@ class IdentityDocument(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     proof_submission_id = db.Column(db.Integer, db.ForeignKey('proof_submissions.id'), nullable=True)
-    type = db.Column(db.String(50))  # e.g., 'passport', 'national_id', 'driver_license'
+    type = db.Column(db.String(50))
     image_url = db.Column(db.String(255))
     issue_date = db.Column(db.Date)
     expiry_date = db.Column(db.Date)
@@ -129,8 +138,29 @@ class LoginSession(db.Model):
     ip_address = db.Column(db.String(50))
     user_agent = db.Column(db.String(255))
     
-    # Relationship
     user = db.relationship('User', backref=db.backref('login_sessions', lazy='dynamic'))
     
     def __repr__(self):
         return f'<LoginSession {self.id} for User {self.user_id}>'
+
+class QuarterVerification(db.Model):
+    __tablename__ = 'quarter_verifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    quarter = db.Column(db.String(10))  
+    year = db.Column(db.Integer)
+    status = db.Column(db.String(20), default='pending')  
+    due_date = db.Column(db.Date)
+    verified_at = db.Column(db.DateTime)
+    proof_submission_id = db.Column(db.Integer, db.ForeignKey('proof_submissions.id'), nullable=True)
+
+    user = db.relationship('User', backref='quarter_verifications')
+    proof_submission = db.relationship('ProofSubmission', backref='quarter_verification', uselist=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'quarter', 'year', name='uq_user_quarter_year'),
+    )
+
+    def __repr__(self):
+        return f'<QuarterVerification {self.quarter}-{self.year} for User {self.user_id}>'

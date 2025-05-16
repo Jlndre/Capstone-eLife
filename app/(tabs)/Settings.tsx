@@ -160,7 +160,7 @@ export default function SettingsScreen() {
 
           <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Linking.openURL("https://www.treasury.gov.jm/faqs/")}
+            onPress={() => Linking.openURL("https://aabishuaa.github.io/eLife-Website/contact.html")}
             accessibilityLabel="Open help link"
           >
             <Text style={styles.helpButtonText}>Need Help?</Text>
