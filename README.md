@@ -1,50 +1,203 @@
-# Welcome to your Expo app 👋
+Here is the full `README.Rmd` version of your `README.md`, converted for use with **R Markdown** (e.g., for RStudio or GitHub rendering). It supports markdown formatting and can be knitted to HTML or PDF if needed.
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+---
 
-## Get started
+````rmarkdown
+---
+title: "Project eLife – Digital Proof of Life Verification System"
+output: github_document
+---
 
-1. Install dependencies
+# 🧾 Project eLife
 
-   ```bash
-   npm install
-   ```
+**Project eLife** is a secure, mobile-first application developed for the Government of Jamaica to help pensioners digitally verify their life status without visiting a notary or Justice of the Peace. The system uses AI-based facial recognition and liveness detection, built with:
 
-2. Start the app
+- React Native (Expo) frontend
+- Flask API backend
+- Firebase Storage + PostgreSQL
+- AI-powered face verification and deepfake detection
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
+## 🔗 Repository
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+[GitHub Repo](https://github.com/Jlndre/Capstone-eLife.git)
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## 🚀 Quick Start
 
-When you're ready, run:
+### 📦 Clone the Repository
 
 ```bash
-npm run reset-project
+git clone https://github.com/Jlndre/Capstone-eLife.git
+cd Capstone-eLife
+````
+
+---
+
+## 🧪 Frontend Setup (Expo + React Native)
+
+### ✅ Install Node Modules
+
+```bash
+npm install
+# OR
+yarn install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### ▶️ Run App with Expo
 
-## Learn more
+```bash
+npx expo start
+# Optional: for web only
+npx expo start --web
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+### 💡 Supported Platforms
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Android
+- iOS
+- Web (PWA)
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 🔧 Backend Setup (Flask + PostgreSQL)
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### 📁 Navigate to Backend
+
+```bash
+cd ../elife-backend
+```
+
+### 🐍 Create Virtual Environment
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+### 📦 Install Python Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+#### 🧠 Includes major ML dependencies:
+
+- tensorflow / keras
+- keras-facenet
+- mediapipe
+- easyocr
+- opencv-python-headless
+- scikit-learn
+
+---
+
+### ⚙️ Create `.env` file
+
+```env
+FLASK_ENV=development
+DATABASE_URL=postgresql://<user>:<password>@localhost/<db_name>
+SECRET_KEY=your_flask_secret
+FIREBASE_BUCKET_NAME=your-firebase-bucket.appspot.com
+GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json
+JWT_SECRET=your_jwt_secret
+```
+
+---
+
+### 🔄 Database Migrations
+
+```bash
+flask db init        # Run once
+flask db migrate -m "Initial"
+flask db upgrade
+```
+
+### ▶️ Start Backend Server
+
+```bash
+flask run
+```
+
+---
+
+## 🔗 Firebase Setup (for Storage)
+
+1. Go to [https://console.firebase.google.com/](https://console.firebase.google.com/)
+2. Create a Firebase project
+3. Enable **Storage**
+4. Update Storage rules (for dev):
+
+```js
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write;
+    }
+  }
+}
+```
+
+5. Generate service key (Settings > Service Accounts > Generate new key)
+6. Rename to `serviceAccountKey.json` and place in `elife-backend/`
+
+---
+
+## 🧠 AI & Vision Techniques Used
+
+- Face Matching: `keras-facenet` + cosine similarity
+- Liveness Detection: image sequence + `mediapipe`
+- OCR: `easyocr` on IDs
+- Deepfake Detection: custom TensorFlow model
+- Face Cropping: OpenCV Haar cascades
+
+---
+
+## 📂 Project Structure
+
+```
+Capstone-eLife/
+├── app/         # React Native (Expo)
+│   components/
+│   app/
+│   assets/
+|   constants/
+│
+├── elife-backend/     # Flask backend + AI
+│   ├── app/
+│   ├── firebase/
+│   ├── migrations/
+│   └── .env
+└── README.Rmd
+```
+
+### ⚠️ Final Setup Reminder
+
+After installing dependencies:
+
+> 🔧 **Update the API base URL**
+
+Open the file:
+
+```ts
+utils / config.ts;
+```
+
+And replace the placeholder or default API base URL with your local or production backend address:
+
+```ts
+// config.ts
+export const API_BASE_URL = "http://localhost:5000"; // ← update to your backend URL
+```
+
+> ✅ For production deployments, use your live server IP or domain and ensure CORS is properly configured in the Flask backend.
+
+## 🤝 Contributors
+
+- Joel Dixon
+- Davia Howard
+- Abishua Johnson
+- Emani Longmore
