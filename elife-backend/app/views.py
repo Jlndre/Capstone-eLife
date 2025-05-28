@@ -19,7 +19,7 @@ import uuid
 from firebase_admin import storage
 import re
 from dateutil.parser import parse       
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model # type: ignore
 from sklearn.metrics.pairwise import cosine_similarity
 import shutil
 import tempfile
