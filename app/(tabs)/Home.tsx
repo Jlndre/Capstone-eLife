@@ -132,139 +132,85 @@ export default function HomeScreen() {
    * Enhanced useFocusEffect to handle post-verification refresh
    */
   useFocusEffect(
-    useCallback(() => {
-      console.log("HomeScreen focused - checking for verification updates");
-      
-      // Check if we just completed a verification
-      const checkForVerificationUpdate = async () => {
-        try {
-          const lastVerificationTime = await SecureStore.getItemAsync("lastVerificationTime");
-          const lastDashboardRefresh = await SecureStore.getItemAsync("lastDashboardRefresh");
-          
-          // If we have a recent verification that hasn't been reflected in dashboard
-          if (lastVerificationTime && (!lastDashboardRefresh || lastVerificationTime > lastDashboardRefresh)) {
-            console.log("Recent verification detected, forcing dashboard refresh");
-            await forceRefreshDashboard();
-            await SecureStore.setItemAsync("lastDashboardRefresh", new Date().getTime().toString());
-          } else {
-            // Normal refresh
-            clearAllCachedData();
-          }
-        } catch (error) {
-          console.error("Error checking verification updates:", error);
-          clearAllCachedData();
+  useCallback(() => {
+    // Delay fetch to next frame to let screen load first
+    setTimeout(async () => {
+      try {
+        // Step 1: Load cached profile (instant UI render)
+        const cachedProfile = await SecureStore.getItemAsync("cachedProfile");
+        if (cachedProfile) {
+          setProfile(JSON.parse(cachedProfile));
+          setLoading(false); // show instantly while fresh fetch runs
         }
-      };
-      
-      checkForVerificationUpdate();
-      
-      return () => {
-        // Cleanup function (optional)
-      };
-    }, [clearAllCachedData, forceRefreshDashboard])
-  );
+
+        // Step 2: Check for dashboard refresh trigger
+        const lastVerificationTime = await SecureStore.getItemAsync("lastVerificationTime");
+        const lastDashboardRefresh = await SecureStore.getItemAsync("lastDashboardRefresh");
+
+        const shouldForceRefresh =
+          lastVerificationTime &&
+          (!lastDashboardRefresh || lastVerificationTime > lastDashboardRefresh);
+
+        if (shouldForceRefresh) {
+          console.log("Recent verification detected, forcing dashboard refresh");
+          await SecureStore.setItemAsync("lastDashboardRefresh", new Date().getTime().toString());
+          await fetchProfile(true);
+          await fetchDashboardSummary();
+        } else {
+          // Just fetch silently in background to update stale data
+          fetchProfile(true);
+          fetchDashboardSummary();
+        }
+      } catch (err) {
+        console.error("Error during useFocusEffect:", err);
+      }
+    }, 0);
+  }, [])
+);
 
   /**
    * Fetch user profile data with improved user validation
    */
-  const fetchProfile = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const fetchProfile = useCallback(async (silent = false) => {
+  if (!silent) setLoading(true);
+  setError("");
 
-    try {
-      // Get the token
-      const token = await SecureStore.getItemAsync("jwt");
-      if (!token) {
-        console.log("No token found, redirecting to login");
-        router.replace(Routes.Login);
+  try {
+    const token = await SecureStore.getItemAsync("jwt");
+    if (!token) {
+      router.replace(Routes.Login);
+      return;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/profile?t=${Date.now()}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        await handleLogout();
         return;
       }
-
-      // Get stored user ID
-      const storedUserId = await SecureStore.getItemAsync("currentUserId");
-
-      // Add cache buster to prevent caching
-      const cacheBuster = new Date().getTime();
-
-      console.log("Fetching profile data...");
-      
-      // Fetch with cache control headers
-      const response = await fetch(
-        `${API_BASE_URL}/profile?t=${cacheBuster}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-        }
-      );
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.log("Token expired, clearing data and redirecting to login");
-          await handleLogout();
-          return;
-        }
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("Profile data received:", { id: data.id, username: data.username });
-
-      // IMPROVED: More robust user ID validation
-      const receivedUserId = String(data.id);
-      
-      if (storedUserId) {
-        const normalizedStoredId = String(storedUserId).trim();
-        const normalizedReceivedId = receivedUserId.trim();
-        
-        // Only show mismatch error if IDs are significantly different
-        // (not just due to type differences or whitespace)
-        if (normalizedStoredId !== normalizedReceivedId) {
-          console.log("User ID mismatch detected", {
-            stored: normalizedStoredId,
-            received: normalizedReceivedId
-          });
-          
-          // Auto-update the stored ID instead of forcing logout
-          console.log("Auto-updating stored user ID to match server response");
-          await SecureStore.setItemAsync("currentUserId", normalizedReceivedId);
-        }
-      } else {
-        // No stored user ID, store the received one
-        await SecureStore.setItemAsync("currentUserId", receivedUserId);
-        console.log("Stored user ID for first time:", receivedUserId);
-      }
-
-      // Set the profile data and current user ID
-      setProfile(data);
-      setCurrentUserId(receivedUserId);
-      
-      console.log("Profile set successfully for user:", data.details?.firstname);
-
-    } catch (err) {
-      console.error("Failed to load profile", err);
-      setError("Failed to load profile data");
-
-      Alert.alert(
-        "Connection Error",
-        "Unable to load your profile. Please check your connection and try again.",
-        [
-          { text: "Try Again", onPress: () => fetchProfile() },
-          {
-            text: "Log Out",
-            onPress: async () => {
-              await handleLogout();
-            },
-          },
-        ]
-      );
-    } finally {
-      setLoading(false);
+      throw new Error(`Server responded with ${response.status}`);
     }
-  }, [router]);
+
+    const data = await response.json();
+
+    setProfile(data);
+    setCurrentUserId(String(data.id));
+    await SecureStore.setItemAsync("cachedProfile", JSON.stringify(data));
+  } catch (err) {
+    console.error("Failed to load profile", err);
+    if (!silent) {
+      setError("Failed to load profile data");
+    }
+  } finally {
+    if (!silent) setLoading(false);
+  }
+}, []);
 
   /**
    * Enhanced fetchDashboardSummary with quarter opening logic
