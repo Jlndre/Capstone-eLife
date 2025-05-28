@@ -289,12 +289,12 @@ def dashboard_summary(current_user):
                 not_yet_open.append(entry)
                 print(f"  -> Added to not_yet_open (opens {opening_date})")
                 
-            elif q.due_date.date() >= today and q.status == 'pending':
+            elif q.due_date >= today and q.status == 'pending':
                 # Quarter is open and pending (but not current quarter)
                 upcoming.append(entry)
                 print(f"  -> Added to upcoming")
                 
-            elif q.due_date.date() < today and q.status == 'pending':
+            elif q.due_date < today and q.status == 'pending':
                 # Overdue quarters should be marked as missed
                 print(f"  -> Quarter is overdue, marking as missed")
                 entry["status"] = "missed"

@@ -94,12 +94,31 @@ export default function DashboardScreen() {
     (a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      console.log("📲 Dashboard focused. Fetching latest data...");
-      fetchDashboardData();
-    }, [])
-  );
+useFocusEffect(
+  useCallback(() => {
+    const checkAndFetch = async () => {
+      console.log(" Dashboard focused. Fetching latest data...");
+      await fetchDashboardData();
+
+      // Retry if there's no current or upcoming/completed quarters
+      const noQuarters =
+        !currentQuarter &&
+        upcomingQuarters.length === 0 &&
+        completedQuarters.length === 0 &&
+        missedQuarters.length === 0;
+
+      if (noQuarters) {
+        console.log(" No quarters found. Retrying fetch in 1 second...");
+        setTimeout(() => {
+          fetchDashboardData();
+        }, 100);
+      }
+    };
+
+    checkAndFetch();
+  }, [])
+);
+
   // Check quarter eligibility
   const checkQuarterEligibility = async () => {
     try {
