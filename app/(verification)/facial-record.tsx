@@ -370,38 +370,59 @@ export default function FacialRecord() {
           return;
         }
 
-        // Handle API response
-        if (!response.ok) {
-          console.error("Verify API error:", response.status);
-
-          if (isMounted) {
-            updateVerificationStep("deepfake-check", "error");
-            updateVerificationStep("face-match", "error");
-            handleVerificationFailure();
-          }
-          return;
-        }
-
-        const result = await response.json();
-
-        if (!isMounted) return;
-
-        // Update verification steps based on results
-        updateVerificationStep(
-          "deepfake-check",
-          result.deepfake_detected ? "error" : "success"
-        );
-        updateVerificationStep(
-          "face-match",
-          result.match ? "success" : "error"
-        );
-
-        if (result.success) {
-          // Navigate to the VerificationSuccess screen instead of showing an alert
-          navigateTo(Routes.CertificateGenerated);
-        } else {
+// Handle API response
+    if (!response.ok) {
+      console.error("Verify API error:", response.status);
+      
+      const errorData = await response.json().catch(() => ({}));
+      
+      if (isMounted) {
+        updateVerificationStep("deepfake-check", "error");
+        updateVerificationStep("face-match", "error");
+        
+        // Check if retry is allowed
+        if (errorData.can_retry !== false) {
           handleVerificationFailure();
+        } else {
+          Alert.alert(
+            "Verification Error", 
+            errorData.message || "Verification failed. Please contact support.",
+            [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
+          );
         }
+      }
+      return;
+    }
+
+    const result = await response.json();
+
+    if (!isMounted) return;
+
+    // Update verification steps based on results
+    updateVerificationStep(
+      "deepfake-check",
+      result.deepfake_detected ? "error" : "success"
+    );
+    updateVerificationStep(
+      "face-match",
+      result.match ? "success" : "error"
+    );
+
+    if (result.success) {
+      // Navigate to success screen
+      navigateTo(Routes.CertificateGenerated);
+    } else {
+      // Check if retry is allowed
+      if (result.can_retry !== false) {
+        handleVerificationFailure();
+      } else {
+        Alert.alert(
+          "Verification Failed", 
+          result.message || "Verification failed permanently.",
+          [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
+        );
+      }
+    }
       } catch (error) {
         console.error("Verification network error:", error);
 
@@ -427,6 +448,7 @@ export default function FacialRecord() {
   };
 
   // Handle verification failure
+  // Handle verification failure
   const handleVerificationFailure = () => {
     if (!isMounted) return;
 
@@ -446,13 +468,18 @@ export default function FacialRecord() {
       );
     } else {
       Alert.alert(
-        "Verification",
-        "Please try again, teher was a face mismatch.",
+        "Verification Failed",
+        "There was a face mismatch. Please ensure good lighting and that your face is clearly visible.",
         [
           {
             text: "Try Again",
             onPress: () => navigateTo(Routes.Step2Verification),
           },
+          {
+            text: "Cancel",
+            onPress: () => navigateTo(Routes.Home),
+            style: "cancel"
+          }
         ]
       );
     }
@@ -473,9 +500,9 @@ export default function FacialRecord() {
     updateVerificationStep("face-match", "pending");
   };
 
-  const navigateTo = (route: string) => {
+  const navigateTo = (route: any) => {
     if (isMounted) {
-      router.replace("/");
+      router.replace(route);
     }
   };
 

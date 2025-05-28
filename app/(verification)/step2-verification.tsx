@@ -1,6 +1,6 @@
 import { Images } from "@/assets/images";
 import { Routes } from "@/constants/routes";
-import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { FontAwesome5 } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -146,21 +146,6 @@ const Step2VerificationScreen = () => {
           <Text style={styles.verificationText}>START PROCESS NOW</Text>
         </TouchableOpacity>
       </View>
-
-      {!showCountdown && (
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons
-            name="arrow-back"
-            size={18}
-            color="#1F245E"
-            style={styles.backIcon}
-          />
-          <Text style={styles.backButtonText}>Go back</Text>
-        </TouchableOpacity>
-      )}
 
       {/* Countdown Overlay */}
       {showCountdown && (

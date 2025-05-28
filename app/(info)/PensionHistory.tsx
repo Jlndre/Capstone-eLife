@@ -14,7 +14,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Type definition for certificate
 type Certificate = {
   id: string;
   date: string;
@@ -27,24 +26,26 @@ export default function PensionHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch verification certificates on component mount
   useEffect(() => {
     const fetchCertificates = async () => {
       try {
+        // Get JWT token from secure storage
         const token = await SecureStore.getItemAsync("jwt");
+
         if (!token) {
           setError("Authentication token not found");
           setLoading(false);
           return;
         }
-
-        const response = await fetch(`${API_BASE_URL}/verification-history`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
+        const response = await fetch(`${API_BASE_URL}/verification-history`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
 
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
@@ -54,8 +55,11 @@ export default function PensionHistory() {
         setCertificates(data);
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Failed to fetch verification history"
+          err instanceof Error
+            ? err.message
+            : "Failed to fetch verification history"
         );
+        console.error("Error fetching certificates:", err);
       } finally {
         setLoading(false);
       }
@@ -77,11 +81,13 @@ export default function PensionHistory() {
         <Text style={styles.title}>Pension History</Text>
       </View>
 
-      {/* Loading, Error, Empty, or List State */}
+      {/* Loading State */}
       {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1F245E" />
-          <Text style={styles.loadingText}>Loading verification history...</Text>
+          <Text style={styles.loadingText}>
+            Loading verification history...
+          </Text>
         </View>
       ) : error ? (
         <View style={styles.centerContainer}>
@@ -93,13 +99,18 @@ export default function PensionHistory() {
           <Text style={styles.emptyText}>No verification history found</Text>
         </View>
       ) : (
+        /* List of Certificates */
         <FlatList
           data={certificates}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => (
             <View style={styles.card}>
-              <Ionicons name="checkmark-circle-outline" size={24} color="#1FAD66" />
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={24}
+                color="#1FAD66"
+              />
               <View style={styles.cardInfo}>
                 <Text style={styles.cardDate}>{item.date}</Text>
                 <Text style={styles.cardStatus}>{item.status}</Text>
@@ -186,3 +197,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+  
+
+        
+     

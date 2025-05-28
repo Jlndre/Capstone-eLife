@@ -3,10 +3,10 @@ import { Routes } from "@/constants/routes";
 import { API_BASE_URL } from "@/utils/config";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -55,6 +55,8 @@ type QuarterStatus = {
   isCompleted: boolean;
   quarter: string;
   dueDate: string;
+  isOpen?: boolean;
+  openingDate?: string | null;
 };
 
 export default function HomeScreen() {
@@ -70,6 +72,7 @@ export default function HomeScreen() {
   
   // User data state
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentQuarterStatus, setCurrentQuarterStatus] = useState<QuarterStatus>({
     isCompleted: false,
     quarter: "",
@@ -77,164 +80,273 @@ export default function HomeScreen() {
   });
 
   /**
-   * Fetch dashboard summary to check quarter verification status
+   * Reset all state when component mounts or when focus changes
    */
-  useEffect(() => {
-    const fetchDashboardSummary = async () => {
-      try {
-        const token = await SecureStore.getItemAsync("jwt");
-        if (!token) return;
+  const resetState = useCallback(() => {
+    setProfile(null);
+    setCurrentUserId(null);
+    setCurrentQuarterStatus({
+      isCompleted: false,
+      quarter: "",
+      dueDate: "",
+    });
+    setError("");
+    setLoading(true);
+  }, []);
 
-        const response = await fetch(`${API_BASE_URL}/api/dashboard-summary`, {
+  /**
+   * Clear cached data and reset state
+   */
+  const clearAllCachedData = useCallback(async () => {
+    try {
+      // Clear cached profile data
+      await SecureStore.deleteItemAsync("cachedProfile");
+      
+      // Reset component state
+      resetState();
+      
+      console.log("Cached data cleared and state reset");
+    } catch (err) {
+      console.error("Failed to clear cached data:", err);
+    }
+  }, [resetState]);
+
+  /**
+   * Force refresh dashboard data (call this after successful verification)
+   */
+  const forceRefreshDashboard = useCallback(async () => {
+    console.log("Force refreshing dashboard data...");
+    setLoading(true);
+    
+    // Clear any cached data
+    await clearAllCachedData();
+    
+    // Fetch fresh data
+    await fetchProfile();
+    await fetchDashboardSummary();
+    
+    setLoading(false);
+  }, []);
+
+  /**
+   * Enhanced useFocusEffect to handle post-verification refresh
+   */
+  useFocusEffect(
+    useCallback(() => {
+      console.log("HomeScreen focused - checking for verification updates");
+      
+      // Check if we just completed a verification
+      const checkForVerificationUpdate = async () => {
+        try {
+          const lastVerificationTime = await SecureStore.getItemAsync("lastVerificationTime");
+          const lastDashboardRefresh = await SecureStore.getItemAsync("lastDashboardRefresh");
+          
+          // If we have a recent verification that hasn't been reflected in dashboard
+          if (lastVerificationTime && (!lastDashboardRefresh || lastVerificationTime > lastDashboardRefresh)) {
+            console.log("Recent verification detected, forcing dashboard refresh");
+            await forceRefreshDashboard();
+            await SecureStore.setItemAsync("lastDashboardRefresh", new Date().getTime().toString());
+          } else {
+            // Normal refresh
+            clearAllCachedData();
+          }
+        } catch (error) {
+          console.error("Error checking verification updates:", error);
+          clearAllCachedData();
+        }
+      };
+      
+      checkForVerificationUpdate();
+      
+      return () => {
+        // Cleanup function (optional)
+      };
+    }, [clearAllCachedData, forceRefreshDashboard])
+  );
+
+  /**
+   * Fetch user profile data with improved user validation
+   */
+  const fetchProfile = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      // Get the token
+      const token = await SecureStore.getItemAsync("jwt");
+      if (!token) {
+        console.log("No token found, redirecting to login");
+        router.replace(Routes.Login);
+        return;
+      }
+
+      // Get stored user ID
+      const storedUserId = await SecureStore.getItemAsync("currentUserId");
+
+      // Add cache buster to prevent caching
+      const cacheBuster = new Date().getTime();
+
+      console.log("Fetching profile data...");
+      
+      // Fetch with cache control headers
+      const response = await fetch(
+        `${API_BASE_URL}/profile?t=${cacheBuster}`,
+        {
           headers: {
             Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
           },
-        });
+        }
+      );
 
-        if (!response.ok) {
-          console.error("Failed to fetch dashboard summary");
+      if (!response.ok) {
+        if (response.status === 401) {
+          console.log("Token expired, clearing data and redirecting to login");
+          await handleLogout();
           return;
         }
+        throw new Error(`Server responded with ${response.status}`);
+      }
 
-        const data = await response.json();
+      const data = await response.json();
+      console.log("Profile data received:", { id: data.id, username: data.username });
 
-        // Check if current quarter is completed
-        if (data.current) {
-          setCurrentQuarterStatus({
-            isCompleted: data.current.status === "completed",
-            quarter: data.current.quarter,
-            dueDate: data.current.due_date,
+      // IMPROVED: More robust user ID validation
+      const receivedUserId = String(data.id);
+      
+      if (storedUserId) {
+        const normalizedStoredId = String(storedUserId).trim();
+        const normalizedReceivedId = receivedUserId.trim();
+        
+        // Only show mismatch error if IDs are significantly different
+        // (not just due to type differences or whitespace)
+        if (normalizedStoredId !== normalizedReceivedId) {
+          console.log("User ID mismatch detected", {
+            stored: normalizedStoredId,
+            received: normalizedReceivedId
           });
+          
+          // Auto-update the stored ID instead of forcing logout
+          console.log("Auto-updating stored user ID to match server response");
+          await SecureStore.setItemAsync("currentUserId", normalizedReceivedId);
         }
-      } catch (err) {
-        console.error("Error fetching dashboard summary:", err);
+      } else {
+        // No stored user ID, store the received one
+        await SecureStore.setItemAsync("currentUserId", receivedUserId);
+        console.log("Stored user ID for first time:", receivedUserId);
       }
-    };
 
-    fetchDashboardSummary();
-  }, []);
+      // Set the profile data and current user ID
+      setProfile(data);
+      setCurrentUserId(receivedUserId);
+      
+      console.log("Profile set successfully for user:", data.details?.firstname);
 
-  /**
-   * Clear cached profile data when component mounts
-   */
-  useEffect(() => {
-    const clearCachedData = async () => {
-      try {
-        await SecureStore.deleteItemAsync("cachedProfile");
-      } catch (err) {
-        console.error("Failed to clear cached data:", err);
-      }
-    };
-    clearCachedData();
-  }, []);
+    } catch (err) {
+      console.error("Failed to load profile", err);
+      setError("Failed to load profile data");
 
-  /**
-   * Fetch user profile data
-   */
-  useEffect(() => {
-    const fetchProfile = async () => {
-      setLoading(true);
-      setError("");
-
-      try {
-        // Get the token
-        const token = await SecureStore.getItemAsync("jwt");
-        if (!token) {
-          router.replace(Routes.Login);
-          return;
-        }
-
-        // Get the current user ID for verification
-        const currentUserId = await SecureStore.getItemAsync("currentUserId");
-
-        // Add cache buster to prevent caching
-        const cacheBuster = new Date().getTime();
-
-        // Fetch with cache control headers
-        const response = await fetch(
-          `${API_BASE_URL}/profile?t=${cacheBuster}`,
+      Alert.alert(
+        "Connection Error",
+        "Unable to load your profile. Please check your connection and try again.",
+        [
+          { text: "Try Again", onPress: () => fetchProfile() },
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Cache-Control": "no-cache, no-store, must-revalidate",
-              Pragma: "no-cache",
-              Expires: "0",
+            text: "Log Out",
+            onPress: async () => {
+              await handleLogout();
             },
-          }
-        );
-
-        if (!response.ok) {
-          if (response.status === 401) {
-            await SecureStore.deleteItemAsync("jwt");
-            router.replace(Routes.Login);
-            return;
-          }
-          throw new Error(`Server responded with ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        // Verify user ID if we have a stored ID
-        if (currentUserId && String(data.id) !== String(currentUserId)) {
-          setError(
-            "Account mismatch detected. Please log out and log in again."
-          );
-
-          // Force logout if IDs don't match
-          Alert.alert(
-            "Authentication Error",
-            "There was a problem with your account. Please log in again.",
-            [
-              {
-                text: "Log Out",
-                onPress: async () => {
-                  await handleLogout();
-                },
-              },
-            ],
-            { cancelable: false }
-          );
-          return;
-        }
-
-        // Store user ID if not already stored
-        if (!currentUserId) {
-          await SecureStore.setItemAsync("currentUserId", String(data.id));
-        }
-
-        // Set the profile data
-        setProfile(data);
-      } catch (err) {
-        console.error("Failed to load profile", err);
-        setError("Failed to load profile data");
-
-        Alert.alert(
-          "Error",
-          "Failed to load your profile information. Please try again.",
-          [
-            { text: "Try Again", onPress: () => fetchProfile() },
-            {
-              text: "Log Out",
-              onPress: async () => {
-                await handleLogout();
-              },
-            },
-          ]
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProfile();
+          },
+        ]
+      );
+    } finally {
+      setLoading(false);
+    }
   }, [router]);
 
   /**
-   * Handle user logout
-   * Clears all stored data and navigates to login screen
+   * Enhanced fetchDashboardSummary with quarter opening logic
+   */
+  const fetchDashboardSummary = useCallback(async () => {
+    try {
+      const token = await SecureStore.getItemAsync("jwt");
+      if (!token) return;
+
+      console.log("Fetching dashboard summary...");
+
+      // Add cache buster to ensure fresh data
+      const cacheBuster = new Date().getTime();
+      const response = await fetch(`${API_BASE_URL}/api/dashboard-summary?t=${cacheBuster}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
+        },
+      });
+
+      if (!response.ok) {
+        console.error("Failed to fetch dashboard summary:", response.status);
+        return;
+      }
+
+      const data = await response.json();
+      console.log("Dashboard summary received:", data);
+
+      // Check if current quarter is available and handle opening dates
+      if (data.current) {
+        const isQuarterOpen = data.current.is_open !== false; // Default to true if not specified
+        
+        setCurrentQuarterStatus({
+          isCompleted: data.current.status === "completed",
+          quarter: data.current.quarter,
+          dueDate: data.current.due_date,
+          isOpen: isQuarterOpen,
+          openingDate: data.current.opening_date
+        });
+        console.log("Dashboard summary updated:", data.current);
+      } else {
+        console.log("No current quarter found in dashboard data");
+        // If no current quarter, check completed quarters
+        if (data.completed && data.completed.length > 0) {
+          const latestCompleted = data.completed[data.completed.length - 1];
+          console.log("Latest completed quarter:", latestCompleted);
+          
+          // Update status to show no current pending verification
+          setCurrentQuarterStatus({
+            isCompleted: true,
+            quarter: latestCompleted.quarter,
+            dueDate: latestCompleted.due_date,
+            isOpen: true,
+            openingDate: null
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching dashboard summary:", err);
+    }
+  }, []);
+
+  /**
+   * Main effect to fetch data after state is reset
+   */
+  useEffect(() => {
+    if (loading && !profile) {
+      fetchProfile().then(() => {
+        fetchDashboardSummary();
+      });
+    }
+  }, [loading, profile, fetchProfile, fetchDashboardSummary]);
+
+  /**
+   * Handle user logout with enhanced cleanup
    */
   const handleLogout = async () => {
     try {
+      console.log("Logging out user...");
+      
       // Try to call logout API if available
       const token = await SecureStore.getItemAsync("jwt");
       if (token) {
@@ -250,16 +362,24 @@ export default function HomeScreen() {
             }
           );
         } catch (apiError) {
+          console.error("Logout API error:", apiError);
           // Continue with local logout even if API call fails
         }
       }
 
-      // Clear all stored data
+      // Clear all stored data including new fields
       await SecureStore.deleteItemAsync("jwt");
       await SecureStore.deleteItemAsync("currentUserId");
       await SecureStore.deleteItemAsync("cachedProfile");
       await SecureStore.deleteItemAsync("termsAccepted");
       await SecureStore.deleteItemAsync("latest_certificate_id");
+      await SecureStore.deleteItemAsync("lastVerificationTime");
+      await SecureStore.deleteItemAsync("lastDashboardRefresh");
+
+      // Clear component state
+      resetState();
+
+      console.log("All data cleared, navigating to login");
 
       // Navigate to login
       router.replace(Routes.Login);
@@ -270,20 +390,92 @@ export default function HomeScreen() {
     }
   };
 
+  // Add this method to call after successful verification from other screens
+  const handleVerificationSuccess = useCallback(async () => {
+    console.log("Verification completed successfully, updating dashboard");
+    
+    // Store timestamp of successful verification
+    await SecureStore.setItemAsync("lastVerificationTime", new Date().getTime().toString());
+    
+    // Force refresh dashboard
+    await forceRefreshDashboard();
+  }, [forceRefreshDashboard]);
+
   /**
    * Handle the Proof of Life button press
-   * Navigates to verification process or shows alert if already completed
+   * Uses the quarter eligibility API to validate before proceeding
    */
-  const handleProofOfLifePress = () => {
-    if (!currentQuarterStatus.isCompleted) {
+  const handleProofOfLifePress = async () => {
+    try {
+      const token = await SecureStore.getItemAsync("jwt");
+      if (!token) {
+        router.replace(Routes.Login);
+        return;
+      }
+
+      // Check eligibility with the API
+      const response = await fetch(`${API_BASE_URL}/api/quarter-eligibility`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+      });
+
+      if (!response.ok) {
+        Alert.alert("Error", "Failed to check verification eligibility");
+        return;
+      }
+
+      const eligibility = await response.json();
+      console.log("Quarter eligibility:", eligibility);
+
+      if (!eligibility.eligible) {
+        // Show appropriate alert based on the reason
+        let title = "Verification Not Available";
+        let message = eligibility.reason;
+
+        if (eligibility.reason.includes("not yet open")) {
+          title = "Quarter Not Yet Open";
+          message = `The ${eligibility.quarter} quarter verification will open on ${new Date(eligibility.opening_date).toLocaleDateString()}. Please check back after this date.`;
+        } else if (eligibility.reason.includes("already completed")) {
+          title = "Quarter Already Verified";
+          message = `You've already completed verification for ${eligibility.quarter} Quarter ${eligibility.year}.`;
+        } else if (eligibility.reason.includes("ended")) {
+          title = "Verification Period Ended";
+          message = `The verification period for ${eligibility.quarter} Quarter ${eligibility.year} has ended.`;
+        }
+
+        Alert.alert(title, message, [{ text: "OK", style: "cancel" }]);
+        return;
+      }
+
+      // Eligible for verification, proceed
+      console.log("User eligible for verification, proceeding...");
       router.push(Routes.StartProcess);
-    } else {
-      Alert.alert(
-        "Quarter Already Verified",
-        `You've already completed verification for ${currentQuarterStatus.quarter}. Your next verification will be due after ${new Date(currentQuarterStatus.dueDate).toLocaleDateString()}.`,
-        [{ text: "OK", style: "cancel" }]
-      );
+
+    } catch (error) {
+      console.error("Error checking quarter eligibility:", error);
+      Alert.alert("Error", "Failed to check verification eligibility");
     }
+  };
+
+  /**
+   * Get quarter opening date based on quarter name
+   */
+  const getQuarterOpeningDate = (quarterName: string) => {
+    const year = new Date().getFullYear();
+    
+    if (quarterName.includes("First")) {
+      return new Date(year, 0, 1); // January 1
+    } else if (quarterName.includes("Second")) {
+      return new Date(year, 3, 1); // April 1
+    } else if (quarterName.includes("Third")) {
+      return new Date(year, 6, 1); // July 1
+    } else if (quarterName.includes("Fourth")) {
+      return new Date(year, 9, 1); // October 1
+    }
+    
+    return new Date(year, 0, 1); // Default to January 1
   };
 
   /**
@@ -304,11 +496,15 @@ export default function HomeScreen() {
    */
   const forceCleanStorage = async () => {
     if (__DEV__) {
+      console.log("DEV: Force cleaning all storage");
       await SecureStore.deleteItemAsync("jwt");
       await SecureStore.deleteItemAsync("currentUserId");
       await SecureStore.deleteItemAsync("cachedProfile");
       await SecureStore.deleteItemAsync("termsAccepted");
       await SecureStore.deleteItemAsync("latest_certificate_id");
+      await SecureStore.deleteItemAsync("lastVerificationTime");
+      await SecureStore.deleteItemAsync("lastDashboardRefresh");
+      resetState();
       Alert.alert("Dev Mode", "All storage cleared", [
         { text: "OK", onPress: () => router.replace(Routes.Login) },
       ]);
@@ -331,7 +527,7 @@ export default function HomeScreen() {
             </Pressable>
 
             {loading ? (
-              <View style={styles.profilePic} />
+              <View style={[styles.profilePic, { backgroundColor: "#CCCCCC" }]} />
             ) : (
               <Image source={getProfileImage()} style={styles.profilePic} />
             )}
@@ -412,10 +608,17 @@ export default function HomeScreen() {
                       styles.statusBadge, 
                       currentQuarterStatus.isCompleted 
                         ? styles.statusCompleted 
+                        : currentQuarterStatus.isOpen === false
+                        ? styles.statusNotOpen
                         : styles.statusPending
                     ]}>
                       <Text style={styles.statusBadgeText}>
-                        {currentQuarterStatus.isCompleted ? "VERIFIED" : "PENDING"}
+                        {currentQuarterStatus.isCompleted 
+                          ? "VERIFIED" 
+                          : currentQuarterStatus.isOpen === false 
+                          ? "NOT OPEN" 
+                          : "PENDING"
+                        }
                       </Text>
                     </View>
                   </View>
@@ -425,6 +628,8 @@ export default function HomeScreen() {
                   <Text style={styles.currentQuarterSubtitle}>
                     {currentQuarterStatus.isCompleted 
                       ? "Your verification for this quarter is complete." 
+                      : currentQuarterStatus.isOpen === false
+                      ? `Opens on: ${currentQuarterStatus.openingDate ? new Date(currentQuarterStatus.openingDate).toLocaleDateString() : 'TBD'}`
                       : `Due by: ${new Date(currentQuarterStatus.dueDate).toLocaleDateString()}`
                     }
                   </Text>
@@ -473,7 +678,7 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[
                   styles.navButton,
-                  currentQuarterStatus.isCompleted && styles.disabledButton,
+                  (currentQuarterStatus.isCompleted || currentQuarterStatus.isOpen === false) && styles.disabledButton,
                 ]}
                 onPress={handleProofOfLifePress}
               >
@@ -535,9 +740,7 @@ export default function HomeScreen() {
   );
 }
 
-/**
- * Component styles
- */
+// Styles remain the same as your original
 const styles = StyleSheet.create({
   // Layout
   backgroundImage: {
@@ -684,6 +887,9 @@ const styles = StyleSheet.create({
   },
   statusPending: {
     backgroundColor: "#FFA000",
+  },
+  statusNotOpen: {
+    backgroundColor: "#757575",
   },
   statusBadgeText: {
     color: "#fff",

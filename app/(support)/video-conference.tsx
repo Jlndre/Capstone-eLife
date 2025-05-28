@@ -18,6 +18,8 @@ const VideoConferenceScreen = () => {
   const [isWebViewLoading, setIsWebViewLoading] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+
+  // Generate room name or use a fixed one
   const roomName = "elife-verification-room";
 
   useEffect(() => {
@@ -26,10 +28,14 @@ const VideoConferenceScreen = () => {
         const token = await SecureStore.getItemAsync("jwt");
         if (!token) throw new Error("No token found");
 
-        const response = await fetch(`${API_BASE_URL}/profile`, {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await fetch(`${API_BASE_URL}/profile`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
         if (!response.ok) throw new Error("Failed to fetch profile");
 
@@ -38,27 +44,43 @@ const VideoConferenceScreen = () => {
         setDisplayName(fullName);
       } catch (err) {
         console.error("Error fetching user profile:", err);
+        // Set a fallback name if fetch fails
         setDisplayName("ELife User");
       } finally {
-        setTimeout(() => setIsLoadingProfile(false), 1000);
+        // Give a small delay for a better UX before showing the WebView
+        setTimeout(() => {
+          setIsLoadingProfile(false);
+        }, 1000);
       }
     };
 
     fetchDisplayName();
   }, []);
 
+  // Build the Jitsi Meet URL with parameters
   const getJitsiUrl = () => {
     const baseUrl = "https://meet.jit.si/";
-    return displayName
-      ? `${baseUrl}${roomName}#userInfo.displayName=\"${encodeURIComponent(displayName)}\"`
-      : `${baseUrl}${roomName}`;
+
+    // Create URL with parameters
+    let url = `${baseUrl}${roomName}`;
+
+    // Add display name if provided
+    if (displayName) {
+      url += `#userInfo.displayName="${encodeURIComponent(displayName)}"`;
+    }
+
+    return url;
   };
 
+  // JavaScript to execute in WebView to control audio/video if needed in future
   const getInjectedJavaScript = () => {
     return `
       try {
+        // This will run once the page loads
         document.addEventListener('apiLoaded', (e) => {
           const api = e.detail;
+          
+          // Tell React Native that Jitsi is ready
           window.ReactNativeWebView.postMessage(JSON.stringify({type: 'JITSI_READY'}));
         });
       } catch (err) {
@@ -68,6 +90,7 @@ const VideoConferenceScreen = () => {
     `;
   };
 
+  // Handle WebView messages from Jitsi
   const handleWebViewMessage = (event: { nativeEvent: { data: string } }) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
@@ -84,30 +107,43 @@ const VideoConferenceScreen = () => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Life Certificate Verification</Text>
         <View style={styles.connectionStatus}>
-          <View style={styles.connectionDot} />
+          <View
+            style={[styles.connectionDot, { backgroundColor: "#4CAF50" }]}
+          />
           <Text style={styles.connectionText}>Connected Securely</Text>
         </View>
       </View>
 
       {isLoadingProfile ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1F245E" />
-          <Text style={styles.loadingMessage}>Welcome to E-Life Verification</Text>
-          <Text style={styles.loadingSubtext}>Setting up your secure connection...</Text>
+          <ActivityIndicator
+            size="large"
+            color="#1F245E"
+            style={{ width: 80, height: 80 }}
+          />
+          <Text style={styles.loadingMessage}>
+            Welcome to E-Life Verification
+          </Text>
+          <Text style={styles.loadingSubtext}>
+            Setting up your secure connection...
+          </Text>
         </View>
       ) : isWebViewLoading ? (
         <View style={styles.webViewContainer}>
           <WebView
             source={{ uri: getJitsiUrl() }}
             style={styles.webview}
-            javaScriptEnabled
-            domStorageEnabled
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
             mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback
+            allowsInlineMediaPlayback={true}
             injectedJavaScript={getInjectedJavaScript()}
             onMessage={handleWebViewMessage}
           />
-          <TouchableOpacity style={styles.backButton} onPress={() => setIsWebViewLoading(false)}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setIsWebViewLoading(false)}
+          >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -116,14 +152,19 @@ const VideoConferenceScreen = () => {
           <View style={styles.welcomeContainer}>
             <Text style={styles.welcomeMessage}>Hi {displayName},</Text>
             <Text style={styles.instructionText}>
-              You're about to join a video call with our verification agent. Please ensure your camera and microphone are ready.
+              You're about to join a video call with our verification agent.
+              Please ensure your camera and microphone are ready.
             </Text>
             <Text style={styles.waitingText}>
-              After joining, you may need to wait briefly for an agent to connect with you.
+              After joining, you may need to wait briefly for an agent to
+              connect with you.
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.joinButton} onPress={() => setIsWebViewLoading(true)}>
+          <TouchableOpacity
+            style={styles.joinButton}
+            onPress={() => setIsWebViewLoading(true)}
+          >
             <Ionicons name="videocam" size={24} color="#fff" />
             <Text style={styles.joinButtonText}>Start Verification Call</Text>
           </TouchableOpacity>
@@ -131,7 +172,9 @@ const VideoConferenceScreen = () => {
       )}
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>This is a secure encrypted verification call</Text>
+        <Text style={styles.footerText}>
+          This is a secure encrypted verification call
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -273,3 +316,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
+
+  

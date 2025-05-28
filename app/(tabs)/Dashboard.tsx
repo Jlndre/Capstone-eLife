@@ -1,12 +1,12 @@
 import { Images, ProfileInitials } from "@/assets/images";
 import { Routes } from "@/constants/routes";
 import { API_BASE_URL } from "@/utils/config";
-import { AntDesign, Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Image,
@@ -33,6 +33,19 @@ interface QuarterData {
   verified_at?: string;
   status?: string;
   year?: number;
+  opening_date?: string;
+  is_open?: boolean;
+}
+
+interface QuarterEligibility {
+  quarter: string;
+  year: number;
+  eligible: boolean;
+  reason: string;
+  opening_date: string;
+  due_date: string;
+  is_open: boolean;
+  current_date: string;
 }
 
 type EmptyStateCardProps = {
@@ -60,35 +73,58 @@ export default function DashboardScreen() {
   const router = useRouter();
 
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedQuarter, setSelectedQuarter] = useState<QuarterPreview | null>(
-    null
-  );
+  const [selectedQuarter, setSelectedQuarter] = useState<QuarterPreview | null>(null);
   const [isDrawerVisible, setDrawerVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const [name, setName] = useState<string>("");
   const [firstname, setFirstname] = useState<string>("");
   const [year, setYear] = useState<number>(new Date().getFullYear());
-  const [accountStatus, setAccountStatus] = useState<"Active" | "Inactive">(
-    "Active"
-  );
+  const [accountStatus, setAccountStatus] = useState<"Active" | "Inactive">("Active");
 
-  const [isCurrentQuarterCompleted, setIsCurrentQuarterCompleted] =
-    useState(false);
-  const [currentQuarter, setCurrentQuarter] = useState<QuarterData | null>(
-    null
-  );
+  const [isCurrentQuarterCompleted, setIsCurrentQuarterCompleted] = useState(false);
+  const [currentQuarter, setCurrentQuarter] = useState<QuarterData | null>(null);
   const [upcomingQuarters, setUpcomingQuarters] = useState<QuarterData[]>([]);
   const [completedQuarters, setCompletedQuarters] = useState<QuarterData[]>([]);
   const [missedQuarters, setMissedQuarters] = useState<QuarterData[]>([]);
+  
+  const [quarterEligibility, setQuarterEligibility] = useState<QuarterEligibility | null>(null);
 
   const pastQuarters = [...completedQuarters, ...missedQuarters].sort(
     (a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
   );
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      console.log("📲 Dashboard focused. Fetching latest data...");
+      fetchDashboardData();
+    }, [])
+  );
+  // Check quarter eligibility
+  const checkQuarterEligibility = async () => {
+    try {
+      const token = await SecureStore.getItemAsync("jwt");
+      if (!token) return;
+
+      console.log("Checking quarter eligibility...");
+      const response = await fetch(`${API_BASE_URL}/api/quarter-eligibility`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+      });
+
+      if (response.ok) {
+        const eligibility = await response.json();
+        setQuarterEligibility(eligibility);
+        console.log("Quarter eligibility:", eligibility);
+      } else {
+        console.error("Failed to check quarter eligibility:", response.status);
+      }
+    } catch (error) {
+      console.error("Error checking quarter eligibility:", error);
+    }
+  };
 
   const fetchDashboardData = async () => {
     const token = await SecureStore.getItemAsync("jwt");
@@ -97,11 +133,15 @@ export default function DashboardScreen() {
     setIsLoading(true);
     try {
       const token = await SecureStore.getItemAsync("jwt");
+      
+      // Add cache buster to prevent stale data
+      const cacheBuster = new Date().getTime();
       const res = await fetch(
-        `${API_BASE_URL}/api/dashboard-summary`,
+        `${API_BASE_URL}/api/dashboard-summary?t=${cacheBuster}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache, no-store, must-revalidate",
           },
         }
       );
@@ -113,10 +153,20 @@ export default function DashboardScreen() {
         setYear(data.year);
         setAccountStatus(data.active ? "Active" : "Inactive");
         setCurrentQuarter(data.current);
-        setUpcomingQuarters(data.upcoming);
-        setCompletedQuarters(data.completed);
-        setMissedQuarters(data.missed);
+        setUpcomingQuarters(data.upcoming || []);
+        setCompletedQuarters(data.completed || []);
+        setMissedQuarters(data.missed || []);
         setIsCurrentQuarterCompleted(data.current?.status === "completed");
+        
+        console.log("Dashboard data updated:", {
+          current: data.current,
+          upcoming: data.upcoming?.length || 0,
+          completed: data.completed?.length || 0,
+          missed: data.missed?.length || 0
+        });
+        
+        // Check quarter eligibility after fetching dashboard data
+        await checkQuarterEligibility();
       } else {
         console.warn("Dashboard error:", data.message);
         Alert.alert("Error", data.message || "Failed to load dashboard data");
@@ -132,8 +182,37 @@ export default function DashboardScreen() {
     }
   };
 
-  const handleVerifyClick = () => {
+  const handleVerifyClick = async () => {
+    console.log("Verify button clicked");
+    
+    // First check eligibility
+    if (!quarterEligibility) {
+      console.log("No eligibility data, checking...");
+      await checkQuarterEligibility();
+    }
+
+    if (quarterEligibility && !quarterEligibility.eligible) {
+      let title = "Verification Not Available";
+      let message = quarterEligibility.reason;
+
+      if (quarterEligibility.reason.includes("not yet open")) {
+        title = "Quarter Not Yet Open";
+        message = `The ${quarterEligibility.quarter} quarter verification will open on ${new Date(quarterEligibility.opening_date).toLocaleDateString()}. Please check back after this date.`;
+      } else if (quarterEligibility.reason.includes("already completed")) {
+        title = "Quarter Already Verified";
+        message = `You've already completed verification for ${quarterEligibility.quarter} Quarter ${quarterEligibility.year}.`;
+      } else if (quarterEligibility.reason.includes("ended")) {
+        title = "Verification Period Ended";
+        message = `The verification period for ${quarterEligibility.quarter} Quarter ${quarterEligibility.year} has ended.`;
+      }
+
+      Alert.alert(title, message, [{ text: "OK", style: "cancel" }]);
+      return;
+    }
+
+    // Proceed with verification if eligible
     if (!isCurrentQuarterCompleted && currentQuarter) {
+      console.log("Navigating to verification process");
       router.push(Routes.StartProcess);
     }
   };
@@ -153,7 +232,7 @@ export default function DashboardScreen() {
       );
 
       if (res.ok) {
-        fetchDashboardData();
+        await fetchDashboardData();
         Alert.alert(
           "Verification Complete",
           `Your ${currentQuarter?.quarter} Quarter life certificate has been successfully verified!`
@@ -172,12 +251,49 @@ export default function DashboardScreen() {
   };
 
   const handleUpcomingQuarterClick = (item: QuarterPreview) => {
-    setSelectedQuarter(item);
-    setModalVisible(true);
+    // Check if this is actually a not-yet-open quarter
+    const isNotYetOpen = item.date.includes("opens on:") || item.date.includes("Opens on:");
+    
+    if (isNotYetOpen) {
+      setSelectedQuarter(item);
+      setModalVisible(true);
+    } else {
+      // This is a truly upcoming quarter (open but not current)
+      Alert.alert(
+        "Quarter Available Later",
+        `${item.title} will become available for verification after you complete the current quarter.`,
+        [{ text: "OK", style: "cancel" }]
+      );
+    }
   };
 
   const profileLetter = firstname?.charAt(0).toUpperCase() || "A";
   const profileImage = ProfileInitials[profileLetter] || Images.ProfilePicAlt;
+
+  // Helper function to determine button state
+  const getVerificationButtonState = () => {
+    if (!currentQuarter) {
+      return { disabled: true, text: "No Quarter Available", reason: "no_quarter" };
+    }
+
+    // Check if current quarter is completed
+    if (isCurrentQuarterCompleted || currentQuarter.status === 'completed') {
+      return { disabled: true, text: "Already Verified", reason: "completed" };
+    }
+    
+    // Check quarter eligibility
+    if (quarterEligibility && !quarterEligibility.eligible) {
+      if (!quarterEligibility.is_open) {
+        return { disabled: true, text: "Not Yet Open", reason: "not_open" };
+      } else {
+        return { disabled: true, text: "Already Completed", reason: "completed" };
+      }
+    }
+    
+    return { disabled: false, text: "Click to Verify", reason: "available" };
+  };
+
+  const buttonState = getVerificationButtonState();
 
   return (
     <>
@@ -218,62 +334,80 @@ export default function DashboardScreen() {
                 <Text style={styles.cardTitle}>
                   Current Quarter Verification
                 </Text>
-                <TouchableOpacity onPress={fetchDashboardData}>
-                  <MaterialIcons name="refresh" size={20} color="#999" />
-                </TouchableOpacity>
               </View>
               <View style={styles.underline} />
+              
               {currentQuarter ? (
-                isCurrentQuarterCompleted ? (
-                  <View style={styles.completedCertificate}>
-                    <View style={styles.certificateInfo}>
-                      <Text style={styles.certificateInfoText}>
-                        {currentQuarter?.quarter} Quarter {year}
-                      </Text>
-                      <View style={styles.doneTagContainer}>
-                        <AntDesign
-                          name="checkcircle"
-                          size={18}
-                          color="#4CAF50"
-                        />
-                        <Text style={styles.doneTagText}>Completed</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.completedDateText}>
-                      Verified on: {currentQuarter?.verified_at}
+                // Always show current quarter, but with different states
+                <>
+                  <View style={styles.currentQuarterHeader}>
+                    <Text style={styles.currentQuarterTitle}>
+                      {currentQuarter?.quarter} Quarter {year}
                     </Text>
+                    <View style={[
+                      styles.currentQuarterBadge,
+                      (isCurrentQuarterCompleted || currentQuarter.status === 'completed') 
+                        ? styles.verifiedBadge 
+                        : styles.pendingBadge
+                    ]}>
+                      <Text style={styles.currentQuarterBadgeText}>
+                        {(isCurrentQuarterCompleted || currentQuarter.status === 'completed') 
+                          ? "VERIFIED" 
+                          : "PENDING"
+                        }
+                      </Text>
+                    </View>
                   </View>
-                ) : (
-                  <>
-                    <TouchableOpacity
-                      style={styles.certificateBtn}
-                      onPress={handleVerifyClick}
-                      disabled={!currentQuarter}
-                    >
-                      <Text style={styles.certificateBtnText}>
-                        {currentQuarter?.quarter} Quarter {year} - Click to
-                        Verify
+                  
+                  {(isCurrentQuarterCompleted || currentQuarter.status === 'completed') ? (
+                    <View style={styles.verifiedSection}>
+                      <Text style={styles.verifiedText}>
+                         Your verification for this quarter is complete.
                       </Text>
-                    </TouchableOpacity>
-                    <View style={styles.actionRow}>
-                      <Text style={styles.dueText}>
-                        Due by: {currentQuarter?.due_date}
+                      <Text style={styles.verifiedDateText}>
+                        Verified on: {currentQuarter?.verified_at}
                       </Text>
+                    </View>
+                  ) : (
+                    <>
                       <TouchableOpacity
-                        style={styles.demoButton}
-                        onPress={handleQuarterCompletion}
+                        style={[
+                          styles.certificateBtn,
+                          buttonState.disabled && styles.disabledCertificateBtn
+                        ]}
+                        onPress={handleVerifyClick}
+                        disabled={buttonState.disabled}
                       >
-                        <Text style={styles.demoButtonText}>
-                          Test Verification
+                        <Text style={[
+                          styles.certificateBtnText,
+                          buttonState.disabled && styles.disabledBtnText
+                        ]}>
+                          {currentQuarter?.quarter} Quarter {year} - {buttonState.text}
                         </Text>
                       </TouchableOpacity>
-                    </View>
-                  </>
-                )
+                      <View style={styles.actionRow}>
+                        <Text style={styles.dueText}>
+                          {buttonState.reason === "not_open" && quarterEligibility
+                            ? `Opens on: ${new Date(quarterEligibility.opening_date).toLocaleDateString()}`
+                            : `Due by: ${currentQuarter?.due_date}`
+                          }
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.demoButton}
+                          onPress={handleQuarterCompletion}
+                        >
+                          <Text style={styles.demoButtonText}>
+                            Test Verification
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </>
               ) : (
                 <EmptyStateCard
-                  message="No verification required for this quarter."
-                  icon="checkmark-circle-outline"
+                  message="No current quarter available."
+                  icon="calendar-outline"
                 />
               )}
             </View>
@@ -288,25 +422,45 @@ export default function DashboardScreen() {
               </View>
               <View style={styles.underline} />
               {upcomingQuarters.length > 0 ? (
-                upcomingQuarters.map((item, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.upcomingCertificate}
-                    onPress={() =>
-                      handleUpcomingQuarterClick({
-                        title: `${item.quarter} Quarter`,
-                        date: `opens on: ${item.due_date}`,
-                      })
-                    }
-                  >
-                    <Text style={styles.upcomingCertificateText}>
-                      {item.quarter} Quarter {item.year || year}
-                    </Text>
-                    <Text style={styles.upcomingDateText}>
-                      Opens on: {item.due_date}
-                    </Text>
-                  </TouchableOpacity>
-                ))
+                upcomingQuarters.map((item, index) => {
+                  const isNotYetOpen = item.is_open === false || item.opening_date;
+                  const dateText = isNotYetOpen 
+                    ? `Opens on: ${item.opening_date ? new Date(item.opening_date).toLocaleDateString() : item.due_date}`
+                    : `Due by: ${item.due_date}`;
+                    
+                  return (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.upcomingCertificate,
+                        isNotYetOpen && styles.notYetOpenCertificate
+                      ]}
+                      onPress={() =>
+                        handleUpcomingQuarterClick({
+                          title: `${item.quarter} Quarter`,
+                          date: dateText,
+                        })
+                      }
+                    >
+                      <View style={styles.upcomingCertificateHeader}>
+                        <Text style={styles.upcomingCertificateText}>
+                          {item.quarter} Quarter {item.year || year}
+                        </Text>
+                        {isNotYetOpen && (
+                          <View style={styles.notOpenBadge}>
+                            <Text style={styles.notOpenBadgeText}>NOT OPEN</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[
+                        styles.upcomingDateText,
+                        isNotYetOpen && styles.notYetOpenDateText
+                      ]}>
+                        {dateText}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
               ) : (
                 <EmptyStateCard
                   message="No upcoming verifications left for this year."
@@ -395,9 +549,6 @@ export default function DashboardScreen() {
               <View style={styles.modalView}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Quarter Not Available</Text>
-                  <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Ionicons name="close" size={24} color="#555" />
-                  </TouchableOpacity>
                 </View>
                 <View style={styles.modalContent}>
                   <Ionicons
@@ -407,20 +558,20 @@ export default function DashboardScreen() {
                     style={styles.modalIcon}
                   />
                   <Text style={styles.modalText}>
-                    {selectedQuarter?.title || ""} is not open for verification
-                    yet.
+                    {selectedQuarter?.title || ""} is not open for verification yet.
                   </Text>
                   <Text style={styles.modalDate}>
                     It will be available on{" "}
-                    {selectedQuarter?.date.replace("opens on: ", "") || ""}
+                    {selectedQuarter?.date.replace(/Opens on: |opens on: /, "") || ""}
                   </Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => setModalVisible(false)}
-                >
-                  <Text style={styles.modalButtonText}>Close</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalButton}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.modalButtonText}>Close</Text>
+                  </TouchableOpacity>
+
               </View>
             </View>
           </Modal>
@@ -501,16 +652,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e0e0e0",
   },
+  notYetOpenCertificate: {
+    backgroundColor: "#f5f5f5",
+    borderColor: "#bdbdbd",
+    opacity: 0.8,
+  },
+  upcomingCertificateHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
   upcomingCertificateText: {
     fontSize: 16,
     color: "#666",
+    flex: 1,
+  },
+  notOpenBadge: {
+    backgroundColor: "#757575",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  notOpenBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
   },
   upcomingDateText: {
     fontSize: 14,
     color: "#888",
     fontStyle: "italic",
-    marginTop: 4,
     textAlign: "right",
+  },
+  notYetOpenDateText: {
+    color: "#999",
   },
   pastCertificate: {
     borderRadius: 8,
@@ -617,10 +793,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 8,
   },
+  disabledCertificateBtn: {
+    backgroundColor: "#CCCCCC",
+    opacity: 0.6,
+  },
   certificateBtnText: {
     color: "#fff",
     fontSize: 18,
     textAlign: "center",
+  },
+  disabledBtnText: {
+    color: "#666666",
   },
   dueText: {
     fontSize: 14,
@@ -716,8 +899,55 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalButtonText: {
-    color: "white",
-    fontSize: 16,
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: "600",
+  },
+  // New styles for current quarter display
+  currentQuarterHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  currentQuarterTitle: {
+    fontSize: 18,
     fontWeight: "600",
+    color: "#1F245E",
+    flex: 1,
+  },
+  currentQuarterBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  verifiedBadge: {
+    backgroundColor: "#4CAF50",
+  },
+  pendingBadge: {
+    backgroundColor: "#FFA000",
+  },
+  currentQuarterBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  verifiedSection: {
+    backgroundColor: "#f0f7f0",
+    borderRadius: 8,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: "#4CAF50",
+  },
+  verifiedText: {
+    fontSize: 16,
+    color: "#2E7D32",
+    fontWeight: "500",
+    marginBottom: 8,
+  },
+  verifiedDateText: {
+    fontSize: 14,
+    color: "#4CAF50",
+    fontStyle: "italic",
   },
 });

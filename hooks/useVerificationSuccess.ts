@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "@/utils/config";
 import * as SecureStore from 'expo-secure-store';
 import { useState } from 'react';
+
 /**
  * Custom hook to handle all app state changes and API calls
  * when a user's Life verification has succeeded and they view their certificate
@@ -78,7 +79,10 @@ export const useVerificationSuccess = () => {
       
       console.log("Certificate view processing complete", results);
       setIsComplete(true);
-      return results;
+      return {
+        certificateId: resolvedCertificateId,
+        results
+      };
     } catch (err) {
       console.error("Failed to process Life verification:", err);
       setError(err instanceof Error ? err.message : String(err));
@@ -89,11 +93,57 @@ export const useVerificationSuccess = () => {
   };
 
   /**
-   * Generate a new certificate
+   * Generate a new certificate - now checks for recent ProofSubmission first
    */
   const generateCertificate = async (token: string) => {
     try {
       console.log("Attempting to generate a new certificate");
+      
+      // First check if there's a recent approved ProofSubmission that might already have a certificate
+      const dashboardResponse = await fetch(
+        `${API_BASE_URL}/api/dashboard-summary`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      
+      if (dashboardResponse.ok) {
+        const dashboardData = await dashboardResponse.json();
+        console.log("Dashboard data:", dashboardData);
+        
+        // If there are completed quarters, there might already be a certificate
+        if (dashboardData.completed && dashboardData.completed.length > 0) {
+          const mostRecentCompleted = dashboardData.completed[0];
+          if (mostRecentCompleted.ref) {
+            console.log("Found recent completed verification, checking for existing certificate");
+            
+            // Try to find existing certificate via verification history
+            const existingId = await getLatestCertificateId(token);
+            if (existingId) {
+              console.log(`Found existing certificate ID: ${existingId}`);
+              
+              // Fetch the full certificate data
+              const certResponse = await fetch(
+                `${API_BASE_URL}/certificates/${existingId}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                  },
+                }
+              );
+              
+              if (certResponse.ok) {
+                const certData = await certResponse.json();
+                return certData;
+              }
+            }
+          }
+        }
+      }
+      
+      // If no existing certificate found, generate a new one
       const response = await fetch(
         `${API_BASE_URL}/generate-certificate`,
         {
@@ -247,7 +297,7 @@ export const useVerificationSuccess = () => {
           body: JSON.stringify({
             certificate_id: certificateId,
             permissions: ["access_funds", "view_certificate", "trade_assets"],
-          }),
+          }),  
         }
       );
       

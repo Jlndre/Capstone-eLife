@@ -161,7 +161,7 @@ const UploadPhotoIDScreen = () => {
       <View style={styles.headerSection}>
         <Text style={styles.stepTitle}>Step 1: Upload Photo ID</Text>
         <Text style={styles.instruction}>
-          Please upload a valid government-issued photo ID (e.g., NIDS, Driver's
+          Please upload a valid government-issued photo ID (e.g., Electoral ID, Driver's
           License, Passport).
         </Text>
         <View style={styles.curve}>
