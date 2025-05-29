@@ -2,7 +2,7 @@ import { Routes } from "@/constants/routes";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,10 +19,45 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function TermsAndConditionsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [apiError, setApiError] = useState("");
   const router = useRouter();
+
+  // Check if we were properly navigated to this screen
+  useEffect(() => {
+    const checkNavigation = async () => {
+      try {
+        // Check if the token is valid
+        const token = await SecureStore.getItemAsync("jwt");
+        if (!token) {
+          console.error(
+            "No token found in Terms screen - redirecting to Login"
+          );
+          router.replace(Routes.Login);
+          return;
+        }
+
+        // Check if terms have already been accepted (shouldn't get here if they were)
+        const termsAccepted = await SecureStore.getItemAsync("termsAccepted");
+        console.log(
+          "Terms screen loaded, current acceptance status:",
+          termsAccepted
+        );
+
+        if (termsAccepted === "true") {
+          console.log("Terms already accepted - redirecting to Home");
+          router.replace(Routes.Home);
+        }
+      } catch (error) {
+        console.error("Error in Terms screen initialization:", error);
+      }
+    };
+
+    checkNavigation();
+  }, []);
 
   const handleAcceptTerms = () => {
     setAccepted(!accepted);
+    if (apiError) setApiError("");
   };
 
   const handleSubmit = async () => {
@@ -35,11 +70,20 @@ export default function TermsAndConditionsScreen() {
     }
 
     setIsLoading(true);
+    setApiError("");
+
     try {
+      console.log("Saving terms acceptance to SecureStore");
       await SecureStore.setItemAsync("termsAccepted", "true");
+
       const token = await SecureStore.getItemAsync("jwt");
-      await fetch(
-        "https://09c6-208-131-174-130.ngrok-free.app/profile/accept-terms",
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+
+      console.log("Calling accept-terms API");
+      const response = await fetch(
+        "https://879c-63-143-118-227.ngrok-free.app/profile/accept-terms",
         {
           method: "POST",
           headers: {
@@ -49,13 +93,53 @@ export default function TermsAndConditionsScreen() {
         }
       );
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error(
+          `API error (${response.status}):`,
+          errorData.message || "Unknown error"
+        );
+
+        setApiError(
+          `API error (${response.status}): ${
+            errorData.message || "Unknown error"
+          }`
+        );
+      } else {
+        console.log("Terms accepted successfully on API");
+      }
+
       setTimeout(() => {
         setIsLoading(false);
+        console.log("Navigating to Home after terms acceptance");
         router.replace(Routes.Home);
       }, 1000);
     } catch (error) {
+      console.error("Terms acceptance error:", error);
       setIsLoading(false);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+
+      // Store the acceptance locally even if the API failed
+      if (!(await SecureStore.getItemAsync("termsAccepted"))) {
+        await SecureStore.setItemAsync("termsAccepted", "true");
+      }
+
+      Alert.alert(
+        "Warning",
+        "Terms were accepted locally, but we couldn't save to the server. You can continue using the app, but you may need to accept terms again later.",
+        [
+          {
+            text: "Continue Anyway",
+            onPress: () => router.replace(Routes.Home),
+          },
+        ]
+      );
+    }
+  };
+
+  const resetTerms = async () => {
+    if (__DEV__) {
+      await SecureStore.deleteItemAsync("termsAccepted");
+      Alert.alert("Dev Mode", "Terms acceptance reset for testing.");
     }
   };
 
@@ -67,6 +151,11 @@ export default function TermsAndConditionsScreen() {
       >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Terms and Conditions</Text>
+          {__DEV__ && (
+            <TouchableOpacity onPress={resetTerms} style={styles.devButton}>
+              <Text style={styles.devButtonText}>Reset Terms (DEV)</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <ScrollView
@@ -160,6 +249,8 @@ export default function TermsAndConditionsScreen() {
         </ScrollView>
 
         <View style={styles.acceptanceSection}>
+          {apiError ? <Text style={styles.errorText}>{apiError}</Text> : null}
+
           <TouchableOpacity
             style={styles.checkboxContainer}
             onPress={handleAcceptTerms}
@@ -180,7 +271,7 @@ export default function TermsAndConditionsScreen() {
               !accepted && styles.submitButtonDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={isLoading}
+            disabled={isLoading || !accepted}
           >
             {isLoading ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -205,11 +296,24 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#e0e0e0",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: "bold",
     color: "#1F245E",
+  },
+  devButton: {
+    backgroundColor: "#ffcc00",
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 4,
+  },
+  devButtonText: {
+    fontSize: 12,
+    color: "#333",
   },
   termsContainer: {
     flex: 1,
@@ -285,5 +389,10 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  errorText: {
+    color: "#D32F2F",
+    fontSize: 14,
+    marginBottom: 10,
   },
 });

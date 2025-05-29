@@ -43,7 +43,7 @@ export default function ProfileScreen() {
       try {
         const token = await SecureStore.getItemAsync("jwt");
         const res = await fetch(
-          "https://09c6-208-131-174-130.ngrok-free.app/profile",
+          "https://879c-63-143-118-227.ngrok-free.app/profile",
           {
             headers: {
               Authorization: `Bearer ${token}`,

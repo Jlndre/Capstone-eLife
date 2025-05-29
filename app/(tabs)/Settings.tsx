@@ -172,7 +172,6 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  // same styles as before...
   safeArea: {
     flex: 1,
     backgroundColor: "#F5F7FA",

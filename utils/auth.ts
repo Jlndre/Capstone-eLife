@@ -4,7 +4,7 @@ import { jwtDecode } from "jwt-decode";
 
 interface TokenPayload {
   user_id: number;
-  exp: number; // Expiry timestamp
+  exp: number; 
 }
 
 export async function isTokenValid(): Promise<boolean> {
@@ -13,7 +13,7 @@ export async function isTokenValid(): Promise<boolean> {
 
   try {
     const decoded = jwtDecode<TokenPayload>(token);
-    const now = Math.floor(Date.now() / 1000); // current time in seconds
+    const now = Math.floor(Date.now() / 1000); 
     return decoded.exp > now;
   } catch (error) {
     console.error("Invalid token format:", error);

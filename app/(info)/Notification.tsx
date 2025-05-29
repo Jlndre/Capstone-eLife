@@ -34,7 +34,7 @@ export default function Notifications() {
         const token = await SecureStore.getItemAsync("jwt");
 
         const response = await fetch(
-          "https://b018-63-143-118-227.ngrok-free.app/notifications",
+          "https://879c-63-143-118-227.ngrok-free.app/notifications",
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -58,7 +58,6 @@ export default function Notifications() {
     fetchNotifications();
   }, []);
 
-  // Function to render the appropriate icon based on notification type
   const renderIcon = (type: string) => {
     switch (type) {
       case "reminder":

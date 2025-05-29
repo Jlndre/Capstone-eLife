@@ -33,7 +33,7 @@ export default function ProofStepsScreen() {
           {/* Sleek Back Button */}
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.replace("/(tabs)/Dashboard")}
+            onPress={() => router.replace(Routes.Dashboard)}
             activeOpacity={0.7}
           >
             <MaterialIcons name="arrow-back" size={28} color="#0B1741" />

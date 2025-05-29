@@ -1,20 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
 import { useState } from 'react';
 
-/**
- * Custom hook to handle all app state changes and API calls
- * when a user's Life verification has succeeded and they view their certificate
- */
+
 export const useVerificationSuccess = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * Handle all the state changes and API calls when a user views their Life certificate
-   * This is the main function that orchestrates all the necessary API calls and state changes
-   * @param certificateId - The ID of the certificate being viewed (optional)
-   */
+
   const handleLifeCertificateViewed = async (certificateId?: number) => {
     if (isProcessing) return;
     

@@ -31,6 +31,7 @@ from app.utils import token_required, generate_token
 from app.utils import calculate_quarter_due_date
 from app.utils import select_clearest_image, get_largest_face, preprocess_image
 from app.utils import detect_id_type, extract_expiry_date, l2_normalize
+from app.utils import detect_liveness
 
 
 
@@ -522,7 +523,6 @@ def verify_id_upload(current_user):
         print("INTERNAL SERVER ERROR:", str(e))
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
-
 @csrf.exempt
 @auth.route("/verify-images", methods=["POST"])
 @token_required
@@ -533,6 +533,10 @@ def verify_images(current_user):
         images = request.files.getlist('images')
         if not images or len(images) < 1:
             return jsonify({'message': 'At least one image is required'}), 400
+        
+        # Recommend multiple images for better liveness detection
+        if len(images) < 3:
+            print(f"Warning: Only {len(images)} images provided. Liveness detection works better with 3+ images.")
 
         print(f"Received {len(images)} images for verification")
         temp_dir = tempfile.mkdtemp()
@@ -557,6 +561,11 @@ def verify_images(current_user):
             shutil.rmtree(temp_dir)
             return jsonify({'message': 'Failed to find a clear image for verification'}), 422
 
+        # -------- Liveness Detection --------
+        # Import from utils.py
+        liveness_result = detect_liveness(local_image_paths)
+        print(f"Liveness detection result: {liveness_result}")
+        
         # -------- Deepfake Detection --------
         frame = cv2.imread(clearest_image_path)
         frame = cv2.resize(frame, (128, 128)) / 255.0
@@ -645,25 +654,30 @@ def verify_images(current_user):
         # Calculate confidence score and prepare match result
         confidence_score = (adjusted_cosine + (1.0 - min(euclidean_distance, 2.0) / 2.0)) / 2.0
         
+        # Combine all verification checks
+        is_verified = is_match and not is_deepfake and liveness_result['is_live']
+        
         # Record result
         proof = ProofSubmission(
             user_id=current_user.id,
             id_image_url=id_doc.image_url,
             video_url=None,
             image_urls=json.dumps(image_urls),
-            status='approved' if is_match and not is_deepfake else 'flagged',
+            status='approved' if is_verified else 'flagged',
             submitted_at=datetime.now(timezone.utc),
             verified_at=datetime.now(timezone.utc),
-            notes=f"Similarity: {adjusted_cosine:.2f}, Deepfake Score: {deepfake_score:.2f}"
+            notes=f"Similarity: {adjusted_cosine:.2f}, Deepfake Score: {deepfake_score:.2f}, Liveness: {liveness_result['is_live']}"
         )
         db.session.add(proof)
         db.session.commit()
         shutil.rmtree(temp_dir)
 
         return jsonify({
-            "success": bool(is_match and not is_deepfake),
+            "success": bool(is_verified),
             "match": bool(is_match),
             "deepfake_detected": bool(is_deepfake),
+            "liveness_detected": bool(liveness_result['is_live']),
+            "liveness_details": liveness_result['details'],
             "similarity": float(adjusted_cosine),
             "deepfake_score": float(deepfake_score),
             "image_urls": image_urls

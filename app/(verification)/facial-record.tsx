@@ -156,7 +156,7 @@ export default function FacialRecord() {
 
       try {
         const response = await fetch(
-          "https://09c6-208-131-174-130.ngrok-free.app/detect-face",
+          "https://879c-63-143-118-227.ngrok-free.app/detect-face",
           {
             method: "POST",
             headers: {
@@ -168,11 +168,8 @@ export default function FacialRecord() {
         );
 
         clearTimeout(timeoutId);
-
-        // Check if component is still mounted
         if (!isMounted) return;
 
-        // Handle non-OK response
         if (!response.ok) {
           console.error("API error:", response.status);
           return;
@@ -351,7 +348,7 @@ export default function FacialRecord() {
       try {
         // Send request to backend API
         const response = await fetch(
-          "https://09c6-208-131-174-130.ngrok-free.app/verify-images",
+          "https://879c-63-143-118-227.ngrok-free.app/verify-images",
           {
             method: "POST",
             headers: {

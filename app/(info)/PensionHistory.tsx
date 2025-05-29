@@ -37,7 +37,7 @@ export default function PensionHistory() {
           return;
         }
         const response = await fetch(
-          "https://09c6-208-131-174-130.ngrok-free.app/verification-history",
+          "https://879c-63-143-118-227.ngrok-free.app/verification-history",
           {
             method: "GET",
             headers: {
