@@ -26,6 +26,8 @@ import tempfile
 import os
 import mediapipe as mp 
 from keras_facenet import FaceNet
+from app.liveness_detection import LivenessDetector, analyze_image_sequence_for_liveness
+
 
 # Import utility functions from utils modules
 from app.utils import token_required, generate_token
@@ -806,7 +808,7 @@ def verify_id_upload(current_user):
             pass
             
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
-
+    
 @csrf.exempt
 @auth.route("/verify-images", methods=["POST"])
 @token_required
@@ -839,10 +841,10 @@ def verify_images(current_user):
 
         # Proceed with image verification if eligible
         images = request.files.getlist('images')
-        if not images or len(images) < 1:
+        if not images or len(images) < 3:  # Require minimum 3 images for liveness
             return jsonify({
                 'success': False,
-                'message': 'At least one image is required',
+                'message': 'At least 3 images are required for liveness detection',
                 'can_retry': True
             }), 400
 
@@ -852,7 +854,6 @@ def verify_images(current_user):
         bucket = storage.bucket()
 
         try:
-            # [Keep all the existing image processing, deepfake detection, and face matching logic]
             # Upload images to Firebase and save locally for processing
             for idx, image in enumerate(images):
                 filename = f"{uuid.uuid4()}_{idx}.jpg"
@@ -867,8 +868,51 @@ def verify_images(current_user):
                 image.save(local_path)
                 local_image_paths.append(local_path)
 
-            # Select clearest image
-            clearest_image_path = select_clearest_image(local_image_paths)
+            # ADD THIS DEBUG CODE HERE:
+            for idx, local_path in enumerate(local_image_paths):
+                if os.path.exists(local_path):
+                    file_size = os.path.getsize(local_path)
+                    print(f"Image {idx+1}: {local_path} exists, size: {file_size} bytes")
+                else:
+                    print(f"Image {idx+1}: {local_path} MISSING!")
+        
+        # Before calling liveness detection:
+            print(f"About to analyze {len(local_image_paths)} images for liveness")
+            print(f"Image paths: {local_image_paths}")
+
+            # STEP 2: LIVENESS DETECTION 
+            print("Starting liveness detection analysis...")
+            liveness_analysis = analyze_image_sequence_for_liveness(local_image_paths)
+            
+            if not liveness_analysis['success']:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to analyze images for liveness detection',
+                    'can_retry': True,
+                    'liveness_error': liveness_analysis.get('error', 'Unknown error')
+                }), 422
+            
+            liveness_result = liveness_analysis['liveness_result']
+            print(f"Liveness detection results: {liveness_result}")
+            
+            # Check if liveness detection passed
+            if not liveness_result['is_live']:
+                return jsonify({
+                    'success': False,
+                    'message': f"Liveness check failed: {liveness_result['reason']}",
+                    'can_retry': True,
+                    'liveness_failed': True,
+                    'liveness_details': {
+                        'blinks_detected': liveness_result['blinks'],
+                        'movements_detected': liveness_result['head_movements'],
+                        'confidence': liveness_result['confidence'],
+                        'frames_analyzed': liveness_result['frames_analyzed']
+                    }
+                }), 422
+
+            # STEP 3: Select clearest image for face matching (using dlib version)
+            from app.face_verification import select_clearest_image_dlib
+            clearest_image_path = select_clearest_image_dlib(local_image_paths)
             if not clearest_image_path:
                 return jsonify({
                     'success': False,
@@ -876,8 +920,7 @@ def verify_images(current_user):
                     'can_retry': True
                 }), 422
 
-            # [Keep all existing deepfake detection and face matching logic...]
-            # Deepfake Detection
+            # STEP 4: DEEPFAKE DETECTION (existing logic)
             frame = cv2.imread(clearest_image_path)
             frame = cv2.resize(frame, (128, 128)) / 255.0
             if frame.ndim == 2:
@@ -891,8 +934,10 @@ def verify_images(current_user):
             is_deepfake = deepfake_score > 0.5
             print("Deepfake score:", deepfake_score)
 
-            # [Keep all existing face matching logic...]
-            # FaceNet Identity Match
+            # STEP 5: DLIB FACE MATCHING (REPLACED SECTION)
+            from app.face_verification import DlibFaceMatcher
+            
+            # Get ID document
             id_doc = IdentityDocument.query.filter_by(user_id=current_user.id).order_by(IdentityDocument.id.desc()).first()
             if not id_doc:
                 return jsonify({
@@ -901,61 +946,115 @@ def verify_images(current_user):
                     'can_retry': False
                 }), 404
 
-            # [Continue with existing face matching logic...]
             # Download ID image from Firebase
             id_image_blob = bucket.blob(id_doc.image_url.replace(f"https://storage.googleapis.com/{bucket.name}/", ""))
             id_image_path = os.path.join(temp_dir, "id_image.jpg")
             id_image_blob.download_to_filename(id_image_path)
-
-            # Load and preprocess images
-            id_img = cv2.imread(id_image_path)
-            face_img = cv2.imread(clearest_image_path)
-
-            # Apply face detection
-            face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
-            id_gray = cv2.cvtColor(id_img, cv2.COLOR_BGR2GRAY)
-            face_gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
-
-            id_faces = face_detector.detectMultiScale(id_gray, 1.1, 4)
-            face_faces = face_detector.detectMultiScale(face_gray, 1.1, 4)
-
-            # Get the largest face from each image
-            if len(id_faces) > 0:
-                id_img = get_largest_face(id_faces, id_img)
-            if len(face_faces) > 0:
-                face_img = get_largest_face(face_faces, face_img)
-
-            # Resize and preprocess for FaceNet
-            id_img = cv2.resize(id_img, (160, 160))
-            face_img = cv2.resize(face_img, (160, 160))
-
-            id_input = preprocess_image(id_img)
-            face_input = preprocess_image(face_img)
-
-            # Get embeddings and calculate similarity
-            id_embedding = embedder.embeddings(id_input)
-            frame_embedding = embedder.embeddings(face_input)
-
-            raw_similarity = cosine_similarity(frame_embedding, id_embedding)[0][0]
-            id_embedding_norm = l2_normalize(id_embedding)
-            frame_embedding_norm = l2_normalize(frame_embedding)
-            euclidean_distance = np.linalg.norm(frame_embedding_norm - id_embedding_norm)
-            adjusted_cosine = (raw_similarity + 1) / 2
-
-            # Determine match
-            is_match = adjusted_cosine > 0.1 or euclidean_distance < 1.5
-
-            print(f"Face match results:")
-            print(f"- Raw cosine similarity: {raw_similarity:.4f}")
-            print(f"- Adjusted cosine similarity: {adjusted_cosine:.4f}")
-            print(f"- Euclidean distance: {euclidean_distance:.4f}")
-            print(f"- Final match decision: {is_match}")
-
-            # Calculate final verification result
-            verification_success = bool(is_match and not is_deepfake)
             
-            # Create ProofSubmission record
+            # Debug: Check ID image dimensions
+            id_img_check = cv2.imread(id_image_path)
+            if id_img_check is not None:
+                print(f"[DEBUG] Downloaded ID image dimensions: {id_img_check.shape}")
+                if id_img_check.shape[0] < 100 or id_img_check.shape[1] < 100:
+                    print(f"[WARNING] ID image is too small ({id_img_check.shape}), this may cause face detection to fail")
+            else:
+                print(f"[ERROR] Could not read downloaded ID image from {id_image_path}")
+
+            # Initialize dlib face matcher
+            try:
+                face_matcher = DlibFaceMatcher()
+                
+                # Pre-check image sizes before face matching
+                id_img_check = cv2.imread(id_image_path)
+                selfie_img_check = cv2.imread(clearest_image_path)
+                
+                if id_img_check is None:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Failed to load ID image for face matching',
+                        'can_retry': True,
+                        'face_match_error': 'ID image could not be loaded'
+                    }), 422
+                
+                if selfie_img_check is None:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Failed to load selfie image for face matching',
+                        'can_retry': True,
+                        'face_match_error': 'Selfie image could not be loaded'
+                    }), 422
+                
+                # Check if ID image is too small (likely corrupted or heavily compressed)
+                min_dimension = min(id_img_check.shape[0], id_img_check.shape[1])
+                if min_dimension < 80:
+                    return jsonify({
+                        'success': False,
+                        'message': f'ID image is too small for face detection ({id_img_check.shape[1]}x{id_img_check.shape[0]} pixels). Please re-upload your ID document with a higher resolution image.',
+                        'can_retry': False,  # They need to re-upload ID
+                        'face_match_error': f'ID image too small: {id_img_check.shape}'
+                    }), 422
+                
+                # Perform face verification
+                face_match_result = face_matcher.process_verification_images(
+                    id_image_path=id_image_path,
+                    selfie_image_path=clearest_image_path
+                )
+                
+                print(f"Dlib face matching results: {face_match_result}")
+                
+                if not face_match_result['success']:
+                    # Provide more specific error messages
+                    error_msg = face_match_result.get('error', 'Unknown error')
+                    
+                    if 'No face found in ID image' in error_msg:
+                        return jsonify({
+                            'success': False,
+                            'message': 'No face detected in your ID document. Please ensure your ID photo is clear and contains a visible face, then re-upload your ID document.',
+                            'can_retry': False,  # They need to re-upload ID
+                            'face_match_error': error_msg,
+                            'id_image_dimensions': f"{id_img_check.shape[1]}x{id_img_check.shape[0]}"
+                        }), 422
+                    elif 'No face found in selfie image' in error_msg:
+                        return jsonify({
+                            'success': False,
+                            'message': 'No face detected in your verification photos. Please ensure your face is clearly visible and try again.',
+                            'can_retry': True,
+                            'face_match_error': error_msg
+                        }), 422
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'message': f"Face matching failed: {error_msg}",
+                            'can_retry': True,
+                            'face_match_error': error_msg
+                        }), 422
+                
+                # Extract results
+                is_match = face_match_result['match']
+                face_distance = face_match_result['distance']
+                face_similarity = face_match_result['similarity']
+                
+                print(f"Face match results:")
+                print(f"- Distance: {face_distance:.4f}")
+                print(f"- Similarity: {face_similarity:.2f}%")
+                print(f"- Final match decision: {is_match}")
+                
+            except Exception as face_match_error:
+                print(f"Error initializing dlib face matcher: {str(face_match_error)}")
+                import traceback
+                traceback.print_exc()
+                
+                return jsonify({
+                    'success': False,
+                    'message': 'Face matching system error',
+                    'can_retry': True,
+                    'error': str(face_match_error)
+                }), 500
+
+            # STEP 6: FINAL VERIFICATION - Updated to include liveness
+            verification_success = bool(is_match and not is_deepfake and liveness_result['is_live'])
+            
+            # Create ProofSubmission record with liveness and dlib data
             proof = ProofSubmission(
                 user_id=current_user.id,
                 id_image_url=id_doc.image_url,
@@ -964,12 +1063,12 @@ def verify_images(current_user):
                 status='approved' if verification_success else 'flagged',
                 submitted_at=datetime.now(timezone.utc),
                 verified_at=datetime.now(timezone.utc) if verification_success else None,
-                notes=f"Similarity: {adjusted_cosine:.2f}, Deepfake Score: {deepfake_score:.2f}"
+                notes=f"Dlib Distance: {face_distance:.4f}, Similarity: {face_similarity:.2f}%, Deepfake: {deepfake_score:.2f}, Liveness: {liveness_result['confidence']:.2f}, Blinks: {liveness_result['blinks']}, Movements: {liveness_result['head_movements']}"
             )
             db.session.add(proof)
             db.session.flush()  # Get the ID without committing yet
 
-            # If verification successful, create certificate and update quarter
+            # STEP 7: CERTIFICATE GENERATION AND QUARTER UPDATES (COMPLETE ORIGINAL LOGIC)
             certificate_data = None
             if verification_success:
                 try:
@@ -997,8 +1096,17 @@ def verify_images(current_user):
                             "success": True,
                             "match": bool(is_match),
                             "deepfake_detected": bool(is_deepfake),
-                            "similarity": float(adjusted_cosine),
+                            "liveness_passed": bool(liveness_result['is_live']),
+                            "face_distance": float(face_distance),
+                            "face_similarity": float(face_similarity),
                             "deepfake_score": float(deepfake_score),
+                            "liveness_confidence": float(liveness_result['confidence']),
+                            "liveness_details": {
+                                "blinks_detected": liveness_result['blinks'],
+                                "head_movements": liveness_result['head_movements'],
+                                "frames_analyzed": liveness_result['frames_analyzed'],
+                                "reason": liveness_result['reason']
+                            },
                             "image_urls": image_urls,
                             "message": "Verification completed but certificate generation failed - missing user details",
                             "can_retry": False,
@@ -1023,20 +1131,24 @@ def verify_images(current_user):
                             "content": json.loads(existing_cert.content_snapshot) if existing_cert.content_snapshot else {}
                         }
                     else:
-                        # Create new certificate
+                        # Create new certificate with dlib metrics
                         content = {
                             "pensioner_number": current_user.pensioner_number,
                             "user_id": current_user.id,
                             "fullName": f"{user_details.firstname} {user_details.lastname}",
                             "dob": user_details.dob.strftime('%Y-%m-%d') if user_details.dob else None,
                             "trn": user_details.trn,
-                            "verification_method": "Facial Recognition & ID Verification",
+                            "verification_method": "Dlib Face Recognition, ID Verification & Liveness Detection",  # Updated to reflect dlib
                             "quarter": quarter,
                             "issue_date": datetime.utcnow().isoformat(),
                             "expiry_date": None,
                             "verification_timestamp": datetime.utcnow().isoformat(),
-                            "similarity_score": float(adjusted_cosine),
-                            "deepfake_score": float(deepfake_score)
+                            "face_distance": float(face_distance),  # Changed from similarity_score
+                            "face_similarity": float(face_similarity),  # New field
+                            "deepfake_score": float(deepfake_score),
+                            "liveness_confidence": float(liveness_result['confidence']),  # New field
+                            "liveness_blinks": liveness_result['blinks'],  # New field
+                            "liveness_movements": liveness_result['head_movements']  # New field
                         }
                         
                         content_str = json.dumps(content, sort_keys=True)
@@ -1095,6 +1207,8 @@ def verify_images(current_user):
                     print(f"- Certificate ID: {certificate_data['id'] if certificate_data else 'N/A'}")
                     print(f"- Quarter: {current_quarter_name} {year}")
                     print(f"- Proof Submission ID: {proof.id}")
+                    print(f"- Liveness confidence: {liveness_result['confidence']:.2f}")
+                    print(f"- Face similarity: {face_similarity:.2f}%")
                     
                 except Exception as cert_error:
                     print(f"Certificate generation failed: {str(cert_error)}")
@@ -1110,8 +1224,17 @@ def verify_images(current_user):
                         "success": True,
                         "match": bool(is_match),
                         "deepfake_detected": bool(is_deepfake),
-                        "similarity": float(adjusted_cosine),
+                        "liveness_passed": bool(liveness_result['is_live']),
+                        "face_distance": float(face_distance),
+                        "face_similarity": float(face_similarity),
                         "deepfake_score": float(deepfake_score),
+                        "liveness_confidence": float(liveness_result['confidence']),
+                        "liveness_details": {
+                            "blinks_detected": liveness_result['blinks'],
+                            "head_movements": liveness_result['head_movements'],
+                            "frames_analyzed": liveness_result['frames_analyzed'],
+                            "reason": liveness_result['reason']
+                        },
                         "image_urls": image_urls,
                         "message": "Verification completed but certificate generation failed - please try generating certificate manually",
                         "can_retry": False,
@@ -1123,14 +1246,24 @@ def verify_images(current_user):
                 # Verification failed, just commit the proof submission
                 db.session.commit()
 
+            # STEP 8: RETURN COMPLETE RESPONSE WITH ALL DATA (Updated with dlib metrics)
             return jsonify({
                 "success": verification_success,
                 "match": bool(is_match),
                 "deepfake_detected": bool(is_deepfake),
-                "similarity": float(adjusted_cosine),
+                "liveness_passed": bool(liveness_result['is_live']),
+                "face_distance": float(face_distance),  # Changed from similarity
+                "face_similarity": float(face_similarity),  # New field
                 "deepfake_score": float(deepfake_score),
+                "liveness_confidence": float(liveness_result['confidence']),
+                "liveness_details": {
+                    "blinks_detected": liveness_result['blinks'],
+                    "head_movements": liveness_result['head_movements'],
+                    "frames_analyzed": liveness_result['frames_analyzed'],
+                    "reason": liveness_result['reason']
+                },
                 "image_urls": image_urls,
-                "message": "Verification completed successfully" if verification_success else "Verification failed - face mismatch or deepfake detected",
+                "message": "Verification completed successfully" if verification_success else get_failure_message(is_match, is_deepfake, liveness_result['is_live']),
                 "can_retry": not verification_success,
                 "proof_submission_id": proof.id,
                 "certificate": certificate_data
@@ -1168,6 +1301,23 @@ def verify_images(current_user):
                 print(f"Cleaned up temporary directory: {temp_dir}")
             except Exception as cleanup_error:
                 print(f"Error cleaning up temp directory: {cleanup_error}")
+def get_failure_message(is_match, is_deepfake, is_live):
+    """Generate appropriate failure message based on which checks failed"""
+    failures = []
+    
+    if not is_match:
+        failures.append("face doesn't match ID")
+    if is_deepfake:
+        failures.append("deepfake detected")
+    if not is_live:
+        failures.append("liveness check failed")
+    
+    if len(failures) == 1:
+        return f"Verification failed - {failures[0]}"
+    elif len(failures) == 2:
+        return f"Verification failed - {failures[0]} and {failures[1]}"
+    else:
+        return f"Verification failed - {', '.join(failures[:-1])}, and {failures[-1]}"
 
 @auth.route('/api/quarter-eligibility', methods=['GET'])
 @token_required

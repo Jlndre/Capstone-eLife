@@ -1,9 +1,6 @@
 import { Images } from "@/assets/images";
-import { Routes } from "@/constants/routes";
-import { API_BASE_URL } from "@/utils/config";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -19,10 +16,17 @@ const ApprovalPendingScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  // Dot animation refs
   const dot1 = useRef(new Animated.Value(0)).current;
   const dot2 = useRef(new Animated.Value(0)).current;
   const dot3 = useRef(new Animated.Value(0)).current;
 
+  // State to track upload progress
+  const [uploadStatus, setUploadStatus] = useState<string>(
+    "Processing Photo ID..."
+  );
+
+  // Animation setup
   useEffect(() => {
     const animate = (dot: Animated.Value, delay: number) => {
       Animated.loop(
@@ -42,120 +46,47 @@ const ApprovalPendingScreen = () => {
       ).start();
     };
 
+    // Start dot animations
     animate(dot1, 0);
     animate(dot2, 200);
     animate(dot3, 400);
-
-    // Process the actual upload
-    processUpload();
   }, []);
 
-  const processUpload = async () => {
-    try {
-      // Get upload data from params
-      const imageUri = params.imageUri as string;
-      const idType = params.idType as string;
+  // Show realistic progress while backend processes
+  const showProcessingProgress = () => {
+    // Realistic timing based on actual OCR processing
+    setTimeout(() => {
+      setUploadStatus("Detecting document type...");
+    }, 1000);
 
-      if (!imageUri) {
-        console.error("No image URI provided");
-        router.replace(Routes.UploadError);
-        return;
-      }
+    setTimeout(() => {
+      setUploadStatus("Scanning for text...");
+    }, 3000);
 
-      console.log("Processing ID upload...");
+    setTimeout(() => {
+      setUploadStatus("Extracting information...");
+    }, 6000);
 
-      // Get JWT token
-      const token = await SecureStore.getItemAsync("jwt");
-      if (!token) {
-        console.error("No authentication token found");
-        router.replace(Routes.UploadError);
-        return;
-      }
+    setTimeout(() => {
+      setUploadStatus("Verifying details...");
+    }, 10000);
 
-      // Create form data
-      const formData = new FormData();
-      formData.append("id_image", {
-        uri: imageUri,
-        type: "image/jpeg",
-        name: "id_document.jpg",
-      } as any);
+    setTimeout(() => {
+      setUploadStatus("Validating security features...");
+    }, 15000);
 
-      if (idType) {
-        formData.append("id_type", idType);
-      }
+    setTimeout(() => {
+      setUploadStatus("Finalizing verification...");
+    }, 20000);
 
-      // Add timeout for the upload
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      try {
-        // Make the API call
-        const response = await fetch(`${API_BASE_URL}/verify-id-upload`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        const result = await response.json();
-
-        if (response.ok) {
-          console.log("ID upload successful:", result);
-          
-          // Store submission ID if provided
-          if (result.submission_id) {
-            await SecureStore.setItemAsync("latest_submission_id", result.submission_id.toString());
-          }
-
-          // Navigate to success screen
-          router.replace(Routes.UploadSuccess);
-        } else {
-          console.error("ID upload failed:", result);
-          
-          // Store error details for the error screen
-          await SecureStore.setItemAsync("upload_error", JSON.stringify({
-            message: result.message || "Upload failed",
-            details: result
-          }));
-
-          router.replace(Routes.UploadError);
-        }
-      } catch (networkError) {
-        clearTimeout(timeoutId);
-        console.error("Network error during upload:", networkError);
-        
-        // Handle different types of network errors
-        let errorMessage = "Network error occurred";
-        if (networkError instanceof Error) {
-          if (networkError.name === 'AbortError') {
-            errorMessage = "Upload timed out. Please check your connection and try again.";
-          } else {
-            errorMessage = networkError.message || "Failed to connect to server";
-          }
-        }
-
-        await SecureStore.setItemAsync("upload_error", JSON.stringify({
-          message: errorMessage,
-          details: { error: networkError instanceof Error ? networkError.message : String(networkError) }
-        }));
-
-        router.replace(Routes.UploadError);
-      }
-    } catch (error) {
-      console.error("Error processing upload:", error);
-      
-      await SecureStore.setItemAsync("upload_error", JSON.stringify({
-        message: "An unexpected error occurred",
-        details: { error: error instanceof Error ? error.message : String(error) }
-      }));
-
-      router.replace(Routes.UploadError);
-    }
+    // The upload screen will handle navigation once processing completes
+    // This screen just provides visual feedback during the wait
   };
+
+  // Trigger progress display on component mount
+  useEffect(() => {
+    showProcessingProgress();
+  }, []);
 
   return (
     <ImageBackground
@@ -163,9 +94,7 @@ const ApprovalPendingScreen = () => {
       style={styles.container}
       resizeMode="cover"
     >
-      <Text style={styles.text}>
-        Please wait while we verify your ID document...
-      </Text>
+      <Text style={styles.text}>{uploadStatus}</Text>
       <View style={styles.dotsContainer}>
         <Animated.View
           style={[styles.dot, { transform: [{ translateY: dot1 }] }]}
@@ -188,6 +117,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#F6F6F6",
   },
   text: {
     fontSize: 18,

@@ -14,7 +14,9 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Modal,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -27,6 +29,14 @@ interface VerificationStep {
   id: string;
   title: string;
   status: "pending" | "success" | "error" | "processing";
+}
+
+interface LivenessDetails {
+  blinks_detected: number;
+  movements_detected: number;
+  confidence: number;
+  frames_analyzed: number;
+  reason: string;
 }
 
 export default function FacialRecord() {
@@ -42,11 +52,15 @@ export default function FacialRecord() {
   const [verificationInProgress, setVerificationInProgress] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isMounted, setIsMounted] = useState(true);
+  const [showLivenessInstructions, setShowLivenessInstructions] =
+    useState(false);
 
+  // Updated verification steps with liveness detection
   const [verificationSteps, setVerificationSteps] = useState<
     VerificationStep[]
   >([
     { id: "face-detection", title: "Face Detected", status: "pending" },
+    { id: "liveness-check", title: "Liveness Detection", status: "pending" },
     { id: "deepfake-check", title: "Deepfake Check", status: "pending" },
     { id: "face-match", title: "Identity Match", status: "pending" },
   ]);
@@ -117,6 +131,10 @@ export default function FacialRecord() {
     );
   };
 
+  const showLivenessGuide = () => {
+    setShowLivenessInstructions(true);
+  };
+
   const checkFaceDetection = async () => {
     if (
       !isMounted ||
@@ -140,7 +158,6 @@ export default function FacialRecord() {
       try {
         photo = await cameraRef.current.takePictureAsync(pictureOptions);
       } catch (err) {
-        console.error("Error taking picture for face detection:", err);
         return;
       }
       const formData = new FormData();
@@ -156,17 +173,14 @@ export default function FacialRecord() {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/detect-face`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: formData,
-            signal: controller.signal,
-          }
-        );
+        const response = await fetch(`${API_BASE_URL}/detect-face`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
 
         clearTimeout(timeoutId);
 
@@ -174,10 +188,6 @@ export default function FacialRecord() {
         if (!isMounted) return;
 
         // Handle non-OK response
-        if (!response.ok) {
-          console.error("API error:", response.status);
-          return;
-        }
 
         const result = await response.json();
 
@@ -194,16 +204,12 @@ export default function FacialRecord() {
           updateVerificationStep("face-detection", "pending");
         }
       } catch (error) {
-        console.error("Face detection network error:", error);
-
         if (isMounted) {
           setFaceDetected(false);
           updateVerificationStep("face-detection", "pending");
         }
       }
     } catch (error) {
-      console.error("Face detection error:", error);
-
       if (isMounted) {
         setFaceDetected(false);
         updateVerificationStep("face-detection", "pending");
@@ -211,7 +217,7 @@ export default function FacialRecord() {
     }
   };
 
-  // Capture a sequence of images for verification
+  // Capture a sequence of images for liveness verification
   const captureImagesSequence = async () => {
     if (!isMounted || !cameraRef.current || !isCameraReady) return;
 
@@ -220,13 +226,14 @@ export default function FacialRecord() {
       setCaptureCount(0);
 
       // Reset verification steps
+      updateVerificationStep("liveness-check", "pending");
       updateVerificationStep("deepfake-check", "pending");
       updateVerificationStep("face-match", "pending");
 
       const images: string[] = [];
-      const totalImages = 5;
+      const totalImages = 10; // Required for liveness detection
 
-      // Capture loop
+      // Capture loop with liveness-specific timing
       for (let i = 0; i < totalImages; i++) {
         if (!isMounted || !cameraRef.current) {
           setCaptureInProgress(false);
@@ -259,9 +266,9 @@ export default function FacialRecord() {
           images.push(photo.uri);
           setCaptureCount(i + 1);
 
-          // Wait between captures
+          // Slightly longer wait between captures for liveness detection
           if (i < totalImages - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1200));
           }
 
           if (!isMounted) {
@@ -269,40 +276,36 @@ export default function FacialRecord() {
             return;
           }
         } catch (err) {
-          console.error("Error taking picture for verification:", err);
-
-          // If we have at least one image, try to proceed, otherwise fail
-          if (images.length > 0) {
+          // For liveness detection, we need all 5 images minimum
+          if (images.length < 3) {
+            if (isMounted) {
+              setCaptureInProgress(false);
+              Alert.alert(
+                "Capture Error",
+                "Unable to capture enough images for liveness detection. Please ensure good lighting and try again."
+              );
+            }
+            return;
+          } else {
             console.log(
               `Proceeding with ${images.length} images instead of ${totalImages}`
             );
             break;
-          } else {
-            if (isMounted) {
-              setCaptureInProgress(false);
-              Alert.alert(
-                "Camera Error",
-                "Unable to capture verification images. Please try again."
-              );
-            }
-            return;
           }
         }
       }
 
-      // Process the captured images if we have any
-      if (images.length > 0) {
+      // Process the captured images if we have enough
+      if (images.length >= 3) {
         await verifyImages(images);
       } else {
-        throw new Error("No images were captured");
+        throw new Error("Insufficient images for liveness detection");
       }
     } catch (error) {
-      console.error("Capture sequence error:", error);
-
       if (isMounted) {
         Alert.alert(
-          "Verification Error",
-          "Failed to capture verification images. Please ensure good lighting and that your face is clearly visible."
+          "Liveness Capture Error",
+          "Failed to capture images for liveness verification. Please ensure you blink naturally and make slight head movements during capture."
         );
         setCaptureInProgress(false);
         resetVerificationProcess();
@@ -314,7 +317,7 @@ export default function FacialRecord() {
     }
   };
 
-  // Process the captured images and verify identity
+  // Process the captured images and verify identity with liveness
   const verifyImages = async (imageUris: string[]) => {
     if (!isMounted) return;
 
@@ -323,6 +326,7 @@ export default function FacialRecord() {
       setVerificationInProgress(true);
 
       // Update verification steps to processing
+      updateVerificationStep("liveness-check", "processing");
       updateVerificationStep("deepfake-check", "processing");
       updateVerificationStep("face-match", "processing");
 
@@ -336,7 +340,7 @@ export default function FacialRecord() {
       // Create form data for API request
       const formData = new FormData();
 
-      // Add all images to form data
+      // Add all images to form data for liveness detection
       imageUris.forEach((uri, index) => {
         formData.append("images", {
           uri,
@@ -345,23 +349,20 @@ export default function FacialRecord() {
         } as any);
       });
 
-      // Add timeout handling for API request
+      // Add timeout handling for API request (longer for liveness processing)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds for liveness processing
 
       try {
-        // Send request to backend API
-        const response = await fetch(
-          `${API_BASE_URL}/verify-images`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: formData,
-            signal: controller.signal,
-          }
-        );
+        // Send request to backend API with liveness detection
+        const response = await fetch(`${API_BASE_URL}/verify-images`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
 
         clearTimeout(timeoutId);
 
@@ -370,72 +371,78 @@ export default function FacialRecord() {
           return;
         }
 
-// Handle API response
-    if (!response.ok) {
-      console.error("Verify API error:", response.status);
-      
-      const errorData = await response.json().catch(() => ({}));
-      
-      if (isMounted) {
-        updateVerificationStep("deepfake-check", "error");
-        updateVerificationStep("face-match", "error");
-        
-        // Check if retry is allowed
-        if (errorData.can_retry !== false) {
-          handleVerificationFailure();
-        } else {
-          Alert.alert(
-            "Verification Error", 
-            errorData.message || "Verification failed. Please contact support.",
-            [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
-          );
+        // Handle API response with liveness data
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+
+          if (isMounted) {
+            updateVerificationStep("liveness-check", "error");
+            updateVerificationStep("deepfake-check", "error");
+            updateVerificationStep("face-match", "error");
+
+            // Handle specific liveness failures
+            if (errorData.liveness_failed) {
+              handleLivenessFailure(errorData.liveness_details);
+            } else if (errorData.can_retry !== false) {
+              handleVerificationFailure();
+            } else {
+              Alert.alert(
+                "Verification Error",
+                errorData.message ||
+                  "Verification failed. Please contact support.",
+                [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
+              );
+            }
+          }
+          return;
         }
-      }
-      return;
-    }
 
-    const result = await response.json();
+        const result = await response.json();
 
-    if (!isMounted) return;
+        if (!isMounted) return;
 
-    // Update verification steps based on results
-    updateVerificationStep(
-      "deepfake-check",
-      result.deepfake_detected ? "error" : "success"
-    );
-    updateVerificationStep(
-      "face-match",
-      result.match ? "success" : "error"
-    );
-
-    if (result.success) {
-      // Navigate to success screen
-      navigateTo(Routes.CertificateGenerated);
-    } else {
-      // Check if retry is allowed
-      if (result.can_retry !== false) {
-        handleVerificationFailure();
-      } else {
-        Alert.alert(
-          "Verification Failed", 
-          result.message || "Verification failed permanently.",
-          [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
+        // Update verification steps based on liveness results
+        updateVerificationStep(
+          "liveness-check",
+          result.liveness_passed ? "success" : "error"
         );
-      }
-    }
-      } catch (error) {
-        console.error("Verification network error:", error);
+        updateVerificationStep(
+          "deepfake-check",
+          result.deepfake_detected ? "error" : "success"
+        );
+        updateVerificationStep(
+          "face-match",
+          result.match ? "success" : "error"
+        );
 
+        if (result.success) {
+          // All verifications passed including liveness
+          navigateTo(Routes.CertificateGenerated);
+        } else {
+          // Handle specific failure types
+          if (!result.liveness_passed) {
+            handleLivenessFailure(result.liveness_details);
+          } else if (result.can_retry !== false) {
+            handleVerificationFailure();
+          } else {
+            Alert.alert(
+              "Verification Failed",
+              result.message || "Verification failed permanently.",
+              [{ text: "OK", onPress: () => navigateTo(Routes.Home) }]
+            );
+          }
+        }
+      } catch (error) {
         if (isMounted) {
+          updateVerificationStep("liveness-check", "error");
           updateVerificationStep("deepfake-check", "error");
           updateVerificationStep("face-match", "error");
           handleVerificationFailure();
         }
       }
     } catch (error) {
-      console.error("Verification processing error:", error);
-
       if (isMounted) {
+        updateVerificationStep("liveness-check", "error");
         updateVerificationStep("deepfake-check", "error");
         updateVerificationStep("face-match", "error");
         handleVerificationFailure();
@@ -447,8 +454,53 @@ export default function FacialRecord() {
     }
   };
 
-  // Handle verification failure
-  // Handle verification failure
+  // Handle liveness detection failure specifically
+  const handleLivenessFailure = (livenessDetails?: LivenessDetails) => {
+    if (!isMounted) return;
+
+    let failureMessage = "Liveness detection failed. Please ensure you:\n\n";
+
+    if (livenessDetails) {
+      failureMessage += `• Detected blinks: ${livenessDetails.blinks_detected} (need 2+)\n`;
+      failureMessage += `• Detected movements: ${livenessDetails.movements_detected} (need 1+)\n`;
+      failureMessage += `• Confidence: ${(
+        livenessDetails.confidence * 100
+      ).toFixed(1)}% (need 70%+)\n\n`;
+
+      if (livenessDetails.blinks_detected < 2) {
+        failureMessage += "• Blink naturally 2-3 times during capture\n";
+      }
+      if (livenessDetails.movements_detected < 1) {
+        failureMessage +=
+          "• Make slight head movements (turn left/right, up/down)\n";
+      }
+      failureMessage += "• Ensure good lighting on your face\n";
+      failureMessage += "• Look directly at the camera";
+    } else {
+      failureMessage += "• Blink naturally 2-3 times\n";
+      failureMessage += "• Make slight head movements\n";
+      failureMessage += "• Ensure good lighting\n";
+      failureMessage += "• Look directly at the camera";
+    }
+
+    Alert.alert("Liveness Check Failed", failureMessage, [
+      {
+        text: "View Guide",
+        onPress: () => showLivenessGuide(),
+      },
+      {
+        text: "Try Again",
+        onPress: () => resetVerificationProcess(),
+      },
+      {
+        text: "Cancel",
+        onPress: () => navigateTo(Routes.Home),
+        style: "cancel",
+      },
+    ]);
+  };
+
+  // Handle general verification failure
   const handleVerificationFailure = () => {
     if (!isMounted) return;
 
@@ -458,7 +510,7 @@ export default function FacialRecord() {
     if (newFailedAttempts >= 3) {
       Alert.alert(
         "Verification Assistance",
-        "We'll connect you with a live agent to help complete your verification.",
+        "Multiple verification attempts failed. We'll connect you with a live agent for assistance.",
         [
           {
             text: "Continue",
@@ -469,17 +521,21 @@ export default function FacialRecord() {
     } else {
       Alert.alert(
         "Verification Failed",
-        "There was a face mismatch. Please ensure good lighting and that your face is clearly visible.",
+        "Verification unsuccessful. Please ensure good lighting, face the camera directly, and follow the liveness requirements.",
         [
           {
+            text: "View Guide",
+            onPress: () => showLivenessGuide(),
+          },
+          {
             text: "Try Again",
-            onPress: () => navigateTo(Routes.Step2Verification),
+            onPress: () => resetVerificationProcess(),
           },
           {
             text: "Cancel",
             onPress: () => navigateTo(Routes.Home),
-            style: "cancel"
-          }
+            style: "cancel",
+          },
         ]
       );
     }
@@ -496,6 +552,7 @@ export default function FacialRecord() {
 
     // Reset verification steps
     updateVerificationStep("face-detection", "pending");
+    updateVerificationStep("liveness-check", "pending");
     updateVerificationStep("deepfake-check", "pending");
     updateVerificationStep("face-match", "pending");
   };
@@ -543,7 +600,9 @@ export default function FacialRecord() {
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Identity Verification</Text>
-        <View style={styles.placeholder} />
+        <TouchableOpacity style={styles.helpButton} onPress={showLivenessGuide}>
+          <Ionicons name="help-circle" size={24} color="white" />
+        </TouchableOpacity>
       </View>
 
       {/* Camera View */}
@@ -577,7 +636,10 @@ export default function FacialRecord() {
 
         {faceDetected && !captureInProgress && !verificationInProgress && (
           <View style={styles.detectedBanner}>
-            <Text style={styles.detectedText}>Face Detected</Text>
+            <Text style={styles.detectedText}>✓ Face Detected</Text>
+            <Text style={styles.livenessHint}>
+              Ready for liveness verification
+            </Text>
           </View>
         )}
 
@@ -585,6 +647,9 @@ export default function FacialRecord() {
           <View style={styles.instructionBanner}>
             <Text style={styles.instructionText}>
               Position your face in the frame
+            </Text>
+            <Text style={styles.livenessSubtext}>
+              Prepare to blink naturally & move head slightly
             </Text>
           </View>
         )}
@@ -598,19 +663,24 @@ export default function FacialRecord() {
         </View>
       )}
 
-      {/* Capturing UI */}
+      {/* Capturing UI with Liveness Instructions */}
       {captureInProgress && (
         <View style={styles.capturingOverlay}>
           <View style={styles.capturingIndicator}>
             <ActivityIndicator size="small" color="white" />
             <Text style={styles.capturingText}>
-              Capturing image {captureCount}/5
+              Capturing image {captureCount}/10
+            </Text>
+          </View>
+          <View style={styles.livenessInstructions}>
+            <Text style={styles.livenessInstructionText}>
+              {captureCount <= 5 ? "Blink naturally" : "Move head slightly"}
             </Text>
           </View>
         </View>
       )}
 
-      {/* Verification Steps */}
+      {/* Enhanced Verification Steps */}
       <Animated.View style={[styles.verificationSteps, { opacity: fadeAnim }]}>
         {verificationSteps.map((step) => (
           <View key={step.id} style={styles.verificationStep}>
@@ -651,7 +721,9 @@ export default function FacialRecord() {
                 onPress={captureImagesSequence}
                 disabled={!isCameraReady}
               >
-                <Text style={styles.startButtonText}>Start Verification</Text>
+                <Text style={styles.startButtonText}>
+                  Start Liveness Verification
+                </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
@@ -672,11 +744,87 @@ export default function FacialRecord() {
           <View style={styles.processingContainer}>
             <ActivityIndicator size="large" color="white" />
             <Text style={styles.processingText}>
-              Processing verification...
+              Processing verification with liveness detection...
             </Text>
           </View>
         )}
       </Animated.View>
+
+      {/* Liveness Instructions Modal */}
+      <Modal
+        visible={showLivenessInstructions}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowLivenessInstructions(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Liveness Verification Guide</Text>
+
+            <ScrollView style={styles.modalScrollView}>
+              <View style={styles.instructionSection}>
+                <Ionicons name="eye" size={24} color="#4285F4" />
+                <View style={styles.instructionTextContainer}>
+                  <Text style={styles.instructionItemTitle}>
+                    Natural Blinking
+                  </Text>
+                  <Text style={styles.instructionItemText}>
+                    Blink naturally 2-3 times during the 10-image capture
+                    sequence
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.instructionSection}>
+                <Ionicons name="swap-horizontal" size={24} color="#4285F4" />
+                <View style={styles.instructionTextContainer}>
+                  <Text style={styles.instructionItemTitle}>Head Movement</Text>
+                  <Text style={styles.instructionItemText}>
+                    Make slight head movements - turn left/right or up/down
+                    slightly
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.instructionSection}>
+                <Ionicons name="sunny" size={24} color="#4285F4" />
+                <View style={styles.instructionTextContainer}>
+                  <Text style={styles.instructionItemTitle}>Good Lighting</Text>
+                  <Text style={styles.instructionItemText}>
+                    Ensure your face is well-lit and clearly visible
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.instructionSection}>
+                <Ionicons name="camera" size={24} color="#4285F4" />
+                <View style={styles.instructionTextContainer}>
+                  <Text style={styles.instructionItemTitle}>Face Position</Text>
+                  <Text style={styles.instructionItemText}>
+                    Keep your face centered in the frame and look directly at
+                    the camera
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.warningSection}>
+                <Ionicons name="warning" size={20} color="#FF9500" />
+                <Text style={styles.warningText}>
+                  Liveness detection prevents fake photos or videos from being
+                  used for verification
+                </Text>
+              </View>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setShowLivenessInstructions(false)}
+            >
+              <Text style={styles.modalButtonText}>Got It</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -733,8 +881,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
   },
-  placeholder: {
-    width: 40,
+  helpButton: {
+    padding: 8,
   },
   camera: {
     flex: 1,
@@ -771,22 +919,37 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
+    alignItems: "center",
   },
   detectedText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: 16,
+  },
+  livenessHint: {
+    color: "white",
+    fontSize: 12,
+    marginTop: 2,
   },
   instructionBanner: {
     position: "absolute",
     top: height * 0.2,
-    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
+    alignItems: "center",
   },
   instructionText: {
     color: "black",
     fontWeight: "bold",
+    fontSize: 16,
+  },
+  livenessSubtext: {
+    color: "black",
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: "center",
   },
   capturingOverlay: {
     position: "absolute",
@@ -810,6 +973,19 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "bold",
     fontSize: 16,
+  },
+  livenessInstructions: {
+    marginTop: 10,
+    backgroundColor: "rgba(76, 175, 80, 0.8)",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 15,
+  },
+  livenessInstructionText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
   },
   controls: {
     position: "absolute",
@@ -844,13 +1020,14 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     marginTop: 16,
+    textAlign: "center",
   },
   verificationSteps: {
     position: "absolute",
     bottom: 120,
     left: 20,
     right: 20,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     borderRadius: 12,
     padding: 16,
     zIndex: 10,
@@ -883,5 +1060,79 @@ const styles = StyleSheet.create({
   stepText: {
     color: "white",
     fontSize: 14,
+    fontWeight: "500",
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    maxHeight: height * 0.8,
+    width: width * 0.9,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalScrollView: {
+    maxHeight: height * 0.6,
+  },
+  instructionSection: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 20,
+    paddingHorizontal: 10,
+  },
+  instructionTextContainer: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  instructionItemTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 4,
+  },
+  instructionItemText: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+  },
+  warningSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF3CD",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  warningText: {
+    fontSize: 14,
+    color: "#856404",
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 18,
+  },
+  modalButton: {
+    backgroundColor: "#4285F4",
+    borderRadius: 10,
+    paddingVertical: 15,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  modalButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
   },
 });

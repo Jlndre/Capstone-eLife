@@ -83,73 +83,90 @@ const UploadPhotoIDScreen = () => {
 
     setIsUploading(true);
 
-    router.push(Routes.CheckingUpload);
-
-    const formData = new FormData();
-    formData.append("id_image", {
-      uri: file.uri,
-      name: file.name,
-      type: file.type,
-    } as any);
-
     try {
-      const token = await SecureStore.getItemAsync("jwt");
-      const response = await fetch(
-        `${API_BASE_URL}/verify-id-upload`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        }
-      );
+      // Navigate to loading screen immediately for better UX
+      router.push(Routes.CheckingUpload);
 
+      const formData = new FormData();
+      formData.append("id_image", {
+        uri: file.uri,
+        name: file.name,
+        type: file.type,
+      } as any);
+
+      const token = await SecureStore.getItemAsync("jwt");
+      if (!token) {
+        router.replace({
+          pathname: Routes.UploadError,
+          params: { message: "Authentication failed. Please log in again." },
+        });
+        return;
+      }
+
+      // Extended timeout for backend processing (OCR + verification takes time)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 180000); // 3 minutes - enough time for OCR processing
+
+      const response = await fetch(`${API_BASE_URL}/verify-id-upload`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          // Let browser set Content-Type automatically for FormData
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
       const text = await response.text();
-      console.log("RAW RESPONSE:", text);
 
       let data;
       try {
         data = JSON.parse(text);
       } catch (jsonErr) {
-        console.error("JSON parse failed:", jsonErr);
-        router.push({
+        router.replace({
           pathname: Routes.UploadError,
           params: { message: "Server returned invalid response" },
         });
         return;
       }
 
+      // Clear the file after upload attempt
       setFile(null);
 
       if (response.ok) {
+        console.log("Upload and processing successful:", data);
+
+        // Store submission ID
+        if (data.submission_id) {
+          try {
+            await SecureStore.setItemAsync(
+              "latest_submission_id",
+              data.submission_id.toString()
+            );
+          } catch (storeError) {}
+        }
+
+        // Processing is complete - navigate based on next_step
         if (data.next_step === "facial_verification") {
-          router.push(Routes.Step2Verification);
+          router.replace(Routes.Step2Verification);
         } else {
-          router.push({
-            pathname: Routes.UploadError,
-            params: {
-              message:
-                data.message ||
-                "Verification passed partially. Please try again or contact support.",
-            },
-          });
+          router.replace(Routes.UploadSuccess);
         }
       } else {
-        router.push({
+        router.replace({
           pathname: Routes.UploadError,
-          params: {
-            message: data.message || "ID verification failed.",
-          },
+          params: { message: data.message || "ID verification failed." },
         });
       }
     } catch (error) {
-      console.error("Upload error:", error);
-      router.push({
+      let errorMessage = "Network error. Please check your connection.";
+
+      router.replace({
         pathname: Routes.UploadError,
-        params: {
-          message: "Network error. Please check your connection.",
-        },
+        params: { message: errorMessage },
       });
     } finally {
       setIsUploading(false);
@@ -161,8 +178,8 @@ const UploadPhotoIDScreen = () => {
       <View style={styles.headerSection}>
         <Text style={styles.stepTitle}>Step 1: Upload Photo ID</Text>
         <Text style={styles.instruction}>
-          Please upload a valid government-issued photo ID (e.g., Electoral ID, Driver's
-          License, Passport).
+          Please upload a valid government-issued photo ID (e.g., Electoral ID,
+          Driver's License, Passport).
         </Text>
         <View style={styles.curve}>
           <Svg height="100%" width="100%" viewBox="0 0 1440 320">
