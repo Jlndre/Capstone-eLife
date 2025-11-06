@@ -1,4 +1,3 @@
-Here is the full `README.Rmd` version of your `README.md`, converted for use with **R Markdown** (e.g., for RStudio or GitHub rendering). It supports markdown formatting and can be knitted to HTML or PDF if needed.
 
 ---
 
